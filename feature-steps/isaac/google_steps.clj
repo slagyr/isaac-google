@@ -7,11 +7,14 @@
     [isaac.foundation.cli-steps :as fcli]
     [isaac.fs :as fs]
     [cheshire.core :as json]
+    [isaac.google.events :as google-events]
     [isaac.google.handler :as google-handler]
     [isaac.google.identity :as google-identity]
     [isaac.google.inbox :as google-inbox]
+    [isaac.google.registration :as google-registration]
     [isaac.google.token :as google-token]
     [isaac.google.worker :as google-worker]
+    [isaac.tool.memory :as memory]
     [isaac.llm.auth.store :as auth-store]
     [isaac.llm.http :as llm-http]
     [isaac.module.discovery :as discovery]
@@ -21,10 +24,17 @@
 
 (helper! isaac.google-steps)
 
+(def ^:private default-events-state
+  {:subs {} :grant-expires nil :rejects {}})
+
+(def ^:private events-state* (atom default-events-state))
+
 (g/after-scenario
   (fn []
     (alter-var-root #'discovery/*foundation-index-override* (constantly nil))
-    (reset! google-identity/skip-signature?* false)))
+    (reset! google-identity/skip-signature?* false)
+    (reset! events-state* default-events-state)
+    (google-registration/reset-registrations!)))
 
 (defn- feature-fs []
   (or (g/get :mem-fs) (nexus/get :fs) (fs/real-fs)))
@@ -320,3 +330,141 @@
 
 (defthen #"the inbox holds (\d+) record for message \"([^\"]+)\""
   isaac.google-steps/inbox-holds)
+
+;; region ----- Workspace Events / registration timer -----
+
+(defn- space-target [space]
+  (str "//chat.googleapis.com/" space))
+
+(defn- remote-space [sub]
+  (or (:key sub)
+      (second (re-find #"googleapis\.com/(.*)$" (str (:targetResource sub))))))
+
+(defn- record-events-http! [method url headers body query]
+  (let [req (cond-> {:url     url
+                     :method  (str/upper-case (name method))
+                     :headers (or headers {})
+                     :body    body
+                     :stream  false
+                     :key     "value"}
+              query (assoc :query query :query-params query))]
+    (g/update! :outbound-http-requests (fn [prior] (vec (conj (or prior []) req))))
+    (g/assoc! :outbound-http-request req)
+    req))
+
+(defn- stub-events-request! [{:keys [method url headers body query]}]
+  (let [headers (or headers
+                    (try {"Authorization" (str "Bearer " (google-token/token))}
+                         (catch Exception _ {"Authorization" "Bearer at-1"})))]
+    (when (not= :get method)
+      (record-events-http! method url headers body query)))
+  (let [st @events-state*]
+    (cond
+      (and (= :get method) (str/ends-with? url "/subscriptions"))
+      {:subscriptions (vec (vals (:subs st)))}
+
+      (and (= :post method) (str/ends-with? url "/subscriptions"))
+      (let [space  (second (re-find #"googleapis\.com/(.*)$" (str (:targetResource body))))
+            reject (get-in st [:rejects space])]
+        (if reject
+          {:error   :api-error
+           :status  (:status reject)
+           :message (:message reject)
+           :body    {:error {:message (:message reject) :status (:status reject)}}}
+          (let [name (str "subscriptions/s-" (or (second (re-find #"spaces/(.+)$" (or space ""))) "new"))
+                sub  {:name            name
+                      :targetResource  (:targetResource body)
+                      :expireTime      (:grant-expires st)
+                      :eventTypes      (:eventTypes body)
+                      :notificationEndpoint (:notificationEndpoint body)
+                      :payloadOptions  (:payloadOptions body)}]
+            (swap! events-state* assoc-in [:subs space] (assoc sub :key space))
+            sub)))
+
+      (= :patch method)
+      (let [name (second (re-find #"/v1/(subscriptions/.+)$" url))
+            sub  (some (fn [[_ s]] (when (= name (:name s)) s)) (:subs st))]
+        (let [updated (assoc (or sub {}) :expireTime (:grant-expires st) :ttl (:ttl body))]
+          (when-let [k (or (:key sub) (remote-space sub))]
+            (swap! events-state* assoc-in [:subs k] (assoc updated :key k)))
+          updated))
+
+      (= :delete method)
+      (let [name (second (re-find #"/v1/(subscriptions/.+)$" url))]
+        (swap! events-state* update :subs
+               (fn [subs] (into {} (remove (fn [[_ s]] (= name (:name s))) subs))))
+        {})
+
+      :else {})))
+
+(defn workspace-events-has-no-subscriptions []
+  (swap! events-state* assoc :subs {}))
+
+(defn workspace-events-has-subscription [name space ts]
+  (swap! events-state* assoc-in [:subs space]
+         {:name           name
+          :key            space
+          :targetResource (space-target space)
+          :expireTime     ts}))
+
+(defn workspace-events-grants [ts]
+  (swap! events-state* assoc :grant-expires ts))
+
+(defn workspace-events-rejects [space status message]
+  (let [status (if (string? status) (parse-long status) status)]
+    (swap! events-state* assoc-in [:rejects space] {:status status :message message})))
+
+(defn google-registration-timer-ticks []
+  (when-let [inject (requiring-resolve 'isaac.gchat-steps/inject-gchat-module!)]
+    (inject))
+  (let [now  (or (g/get :current-time) (memory/now))
+        fs*  (feature-fs)
+        root (feature-root)]
+    (nexus/-with-nested-nexus {:fs fs* :root root}
+      (with-redefs [google-events/request! stub-events-request!
+                    memory/now (constantly now)]
+        (binding [memory/*now* now]
+          (google-registration/tick! {:now now :root root}))))))
+
+(defn no-outbound-http-to [url]
+  (let [reqs (or (g/get :outbound-http-requests) [])]
+    (g/should= [] (filterv #(= url (:url %)) reqs))))
+
+(defn outbound-http-count-for-space [n url space]
+  (let [n    (if (string? n) (parse-long n) n)
+        reqs (or (g/get :outbound-http-requests) [])
+        hits (filter (fn [r]
+                       (and (= url (:url r))
+                            (or (= (space-target space) (get-in r [:body :targetResource]))
+                                (str/includes? (str (get-in r [:body :targetResource])) space))))
+                     reqs)]
+    (g/should= n (count hits))))
+
+(defn test-clock-advances [n]
+  (let [n   (if (string? n) (parse-long n) n)
+        now (or (g/get :current-time) (java.time.Instant/now))]
+    (g/assoc! :current-time (.plusMillis now n))))
+
+(defgiven "the Workspace Events API has no subscriptions"
+  isaac.google-steps/workspace-events-has-no-subscriptions)
+
+(defgiven #"the Workspace Events API has subscription \"([^\"]+)\" for \"([^\"]+)\" expiring at \"([^\"]+)\""
+  isaac.google-steps/workspace-events-has-subscription)
+
+(defgiven #"the Workspace Events API grants subscriptions expiring at \"([^\"]+)\""
+  isaac.google-steps/workspace-events-grants)
+
+(defgiven #"the Workspace Events API rejects creates for \"([^\"]+)\" with (\d+) \"([^\"]+)\""
+  isaac.google-steps/workspace-events-rejects)
+
+(defwhen "the google registration timer ticks"
+  isaac.google-steps/google-registration-timer-ticks)
+
+(defwhen "the test clock advances {n:int} milliseconds"
+  isaac.google-steps/test-clock-advances)
+
+(defthen #"no outbound HTTP request to \"([^\"]+)\" was made"
+  isaac.google-steps/no-outbound-http-to)
+
+(defthen #"(\d+) outbound HTTP requests to \"([^\"]+)\" for \"([^\"]+)\" were made"
+  isaac.google-steps/outbound-http-count-for-space)

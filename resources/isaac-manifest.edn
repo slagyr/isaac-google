@@ -14,7 +14,17 @@
    :schema      {:type       :map
                  :key-spec   {:type :string}
                  :value-spec {:type    :any
-                              :factory isaac.google.handler/register-handler!}}}}
+                              :factory isaac.google.handler/register-handler!}}}
+  :isaac.google/registration
+  {:description "Workspace Events subscriptions to create and renew. Each contribution is {:create! :renew! :expiry :key}."
+   :schema      {:type       :map
+                 :key-spec   {:type :keyword}
+                 :value-spec {:type    :map
+                              :factory isaac.google.registration/register!
+                              :schema  {:create! {:type :symbol}
+                                        :renew!  {:type :symbol}
+                                        :expiry  {:type :symbol}
+                                        :key     {:type :symbol}}}}}}
 
  :isaac.google/scopes ["openid"]
 
@@ -25,6 +35,9 @@
    :path    "/google/pubsub"
    :handler isaac.google.http/handler
    :scope   :google/push}]
+
+ :isaac/component
+ {:google-registration {:namespace isaac.google.component}}
 
  :isaac/cli
  {:google {:usage     "google <subcommand> [options]"
@@ -37,8 +50,10 @@
                     :description "Shared Google Workspace plumbing — OAuth, Pub/Sub topic, GCP project."
                     :schema      {:project {:type        :string
                                             :description "GCP project id that owns the Pub/Sub topic."}
-                                  :topic   {:type        :string
-                                            :description "Pub/Sub topic path (projects/<id>/topics/<name>)."}
+                                  :topic               {:type        :string
+                                                       :description "Pub/Sub topic path (projects/<id>/topics/<name>)."}
+                                  :renew-within-hours {:type        :int
+                                                       :description "Hours before expiry at which the registration timer renews a subscription. Default 24."}
                                   :oauth   {:name        :google-oauth
                                             :type        :map
                                             :description "OAuth client for the Google user (authorization-code flow)."

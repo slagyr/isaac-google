@@ -25,4 +25,12 @@
   (it "declares the scopes berth and contributes openid"
     (should= :seq (get-in manifest [:berths :isaac.google/scopes :schema :type]))
     (should= ["openid"] (:isaac.google/scopes manifest)))
+
+  (it "declares the registration berth"
+    (should= :map (get-in manifest [:berths :isaac.google/registration :schema :type]))
+    (should= 'isaac.google.registration/register!
+             (get-in manifest [:berths :isaac.google/registration :schema :value-spec :factory])))
+
+  (it "contributes the registration timer component"
+    (should= 'isaac.google.component (get-in manifest [:isaac/component :google-registration :namespace])))
   )

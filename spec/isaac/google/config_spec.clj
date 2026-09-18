@@ -8,8 +8,8 @@
 
 (describe "isaac.google config schema"
 
-  (it "exposes :google table with :project :topic :oauth :push"
-    (should= #{:project :topic :oauth :push} (set (keys (:schema sut/google-schema)))))
+  (it "exposes :google table with :project :topic :oauth :push :renew-within-hours"
+    (should= #{:project :topic :oauth :push :renew-within-hours} (set (keys (:schema sut/google-schema)))))
 
   (it "requires client-id"
     (should-contain :present? (:validations (oauth-field :client-id))))

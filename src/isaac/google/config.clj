@@ -26,9 +26,11 @@
   {:name        :google
    :type        :map
    :description "Shared Google Workspace plumbing — OAuth, Pub/Sub topic, GCP project."
-   :schema      {:project {:type        :string
-                           :description "GCP project id that owns the Pub/Sub topic."}
-                 :topic   {:type        :string
-                           :description "Pub/Sub topic path (projects/<id>/topics/<name>)."}
-                 :oauth   oauth-schema
-                 :push    push-schema}})
+   :schema      {:project             {:type        :string
+                                       :description "GCP project id that owns the Pub/Sub topic."}
+                 :topic               {:type        :string
+                                       :description "Pub/Sub topic path (projects/<id>/topics/<name>)."}
+                 :renew-within-hours {:type        :int
+                                       :description "Hours before expiry at which the registration timer renews a subscription. Default 24."}
+                 :oauth               oauth-schema
+                 :push                push-schema}})
