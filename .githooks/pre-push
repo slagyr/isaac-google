@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+remote_sha=$(git rev-parse @{upstream} 2>/dev/null || echo "")
+local_sha=$(git rev-parse HEAD)
+
+if [ -z "$remote_sha" ]; then
+  changed=$(git diff-tree --no-commit-id --name-only -r "$local_sha" 2>/dev/null || echo "")
+else
+  changed=$(git diff --name-only "$remote_sha".."$local_sha" 2>/dev/null || echo "")
+fi
+
+printf '%s\n' "$changed" | grep -qE '\.(clj|cljs|cljc|feature|edn)$' || exit 0
+
+bb ci
