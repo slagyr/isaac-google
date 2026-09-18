@@ -9,6 +9,7 @@
     [cheshire.core :as json]
     [isaac.google.events :as google-events]
     [isaac.google.handler :as google-handler]
+    [isaac.google.health :as google-health]
     [isaac.google.identity :as google-identity]
     [isaac.google.inbox :as google-inbox]
     [isaac.google.registration :as google-registration]
@@ -414,9 +415,23 @@
   (let [status (if (string? status) (parse-long status) status)]
     (swap! events-state* assoc-in [:rejects space] {:status status :message message})))
 
+(defn- health-space-keys []
+  (vec (sort (keys (:subs @events-state*)))))
+
+(defn- ensure-health-registration! []
+  (when (and (empty? (google-registration/all)) (seq (health-space-keys)))
+    (google-registration/register!
+      [:health-fixture {:create! (fn [key] (google-events/create-subscription!
+                                             {:targetResource (space-target key)}))
+                        :renew!  (fn [name] (google-events/renew-subscription! name))
+                        :expiry  (fn [sub] (or (:expireTime sub) (:expires-at sub)))
+                        :key     health-space-keys}])))
+
 (defn google-registration-timer-ticks []
-  (when-let [inject (requiring-resolve 'isaac.gchat-steps/inject-gchat-module!)]
+  (when-let [inject (try (requiring-resolve 'isaac.gchat-steps/inject-gchat-module!)
+                         (catch Exception _ nil))]
     (inject))
+  (ensure-health-registration!)
   (let [now  (or (g/get :current-time) (memory/now))
         fs*  (feature-fs)
         root (feature-root)]
@@ -424,7 +439,9 @@
       (with-redefs [google-events/request! stub-events-request!
                     memory/now (constantly now)]
         (binding [memory/*now* now]
-          (google-registration/tick! {:now now :root root}))))))
+          (google-registration/tick! {:now      now
+                                      :root     root
+                                      :door-up? (boolean (g/get :server-handler-opts))}))))))
 
 (defn no-outbound-http-to [url]
   (let [reqs (or (g/get :outbound-http-requests) [])]
@@ -445,6 +462,11 @@
         now (or (g/get :current-time) (java.time.Instant/now))]
     (g/assoc! :current-time (.plusMillis now n))))
 
+(fcli/register-isaac-run-wrapper!
+  (fn [thunk]
+    (with-redefs [google-events/request! stub-events-request!]
+      (thunk))))
+
 (defgiven "the Workspace Events API has no subscriptions"
   isaac.google-steps/workspace-events-has-no-subscriptions)
 
@@ -459,6 +481,15 @@
 
 (defwhen "the google registration timer ticks"
   isaac.google-steps/google-registration-timer-ticks)
+
+(defn last-google-event-was-at [key ts]
+  (let [fs*  (feature-fs)
+        root (feature-root)]
+    (nexus/-with-nested-nexus {:fs fs* :root root}
+      (google-health/record-last-event! root key ts))))
+
+(defgiven #"the last Google event for \"([^\"]+)\" was at \"([^\"]+)\""
+  isaac.google-steps/last-google-event-was-at)
 
 (defwhen "the test clock advances {n:int} milliseconds"
   isaac.google-steps/test-clock-advances)

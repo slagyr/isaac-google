@@ -8,7 +8,10 @@
     [isaac.config.loader :as loader]
     [isaac.config.root :as root]
     [isaac.fs :as fs]
+    [isaac.google.events :as events]
+    [isaac.google.health :as health]
     [isaac.google.oauth :as oauth]
+    [isaac.google.registration :as registration]
     [isaac.google.scopes :as scopes]
     [isaac.llm.auth.store :as auth-store]
     [isaac.nexus :as nexus]))
@@ -112,6 +115,57 @@
 (defn- parse-options [raw-args]
   (tools-cli/parse-opts raw-args option-spec))
 
+(defn- remote-key [sub]
+  (let [target (str (or (:targetResource sub) ""))]
+    (or (second (re-find #"googleapis\.com/(.*)$" target))
+        (:key sub))))
+
+(defn- remote-index [subscriptions]
+  (into {}
+        (keep (fn [sub]
+                (when-let [k (remote-key sub)]
+                  [k {:name       (:name sub)
+                      :expires-at (or (:expireTime sub) (:expires-at sub))
+                      :raw        sub}]))
+              subscriptions)))
+
+(defn- configured-keys []
+  (registration/reset-registrations!)
+  (#'registration/ensure-contributions!)
+  (vec (mapcat (fn [[_ entry]]
+                 (let [f (:key entry)]
+                   (cond
+                     (fn? f) (or (f) [])
+                     (sequential? f) f
+                     :else [])))
+               (registration/all))))
+
+
+(defn- run-status [opts]
+  (try
+    (let [root   (derive-root opts)
+          fs*    (feature-fs opts)
+          state  (nexus/-with-nested-nexus {:fs fs* :root root}
+                   (health/load-state root))
+          listed (try
+                   (or (:subscriptions (events/list-subscriptions!)) [])
+                   (catch Exception _ []))
+          remote (or (not-empty (remote-index listed))
+                     (registration/load-state root))
+          keys   (vec (or (seq (configured-keys))
+                          (sort (keys (or (:last-event-at state) {})))
+                          (sort (keys remote))))
+          lines  (health/status-lines {:keys   keys
+                                       :remote remote
+                                       :state  state})]
+      (doseq [line lines]
+        (println line))
+      0)
+    (catch Exception e
+      (binding [*out* *err*]
+        (println (or (.getMessage e) "google status failed")))
+      1)))
+
 (defn run-fn [opts]
   (let [raw-args (or (:_raw-args opts) [])
         subcmd   (first raw-args)]
@@ -126,6 +180,9 @@
         (fn [merged] (run-login merged (:code merged)))
         (assoc opts :_raw-args (vec (rest raw-args))))
 
+      (= "status" subcmd)
+      (run-status opts)
+
       :else
       (do (binding [*out* *err*]
             (println (str "Unknown google subcommand: " subcmd)))
@@ -138,4 +195,5 @@
   option-spec)
 
 (defmethod cli-api/subcommands :google [_id]
-  [{:name "login" :summary "Sign in as the Google user (authorization-code paste)"}])
+  [{:name "login"  :summary "Sign in as the Google user (authorization-code paste)"}
+   {:name "status" :summary "Show Google registrations, expiries, last event, and door"}])

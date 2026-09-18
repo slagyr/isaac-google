@@ -1,4 +1,3 @@
-@wip
 Feature: Google health and attention
   A lapsed watch or subscription goes quiet without an error. Every tick
   of the registration timer also checks health: expiry read from Google,

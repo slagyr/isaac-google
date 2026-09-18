@@ -1,5 +1,5 @@
 {:id          :isaac.google
- :version     "0.1.1"
+ :version     "0.1.2"
  :builtin?    true
  :factory     isaac.google.module/create-module
  :description "Shared Google Workspace plumbing for Isaac — OAuth for the Google user, the Pub/Sub push door and durable inbox, registrations and renewal, health. Knows nothing of Chat or Gmail."
@@ -54,6 +54,11 @@
                                                        :description "Pub/Sub topic path (projects/<id>/topics/<name>)."}
                                   :renew-within-hours {:type        :int
                                                        :description "Hours before expiry at which the registration timer renews a subscription. Default 24."}
+                                  :health {:name        :google-health
+                                           :type        :map
+                                           :description "Silence threshold for Google health checks."
+                                           :schema      {:silent-after-hours {:type        :int
+                                                                              :description "Hours without an event before a registration is silent. Default 6."}}}
                                   :oauth   {:name        :google-oauth
                                             :type        :map
                                             :description "OAuth client for the Google user (authorization-code flow)."

@@ -8,10 +8,12 @@
     [isaac.config.root :as root]
     [isaac.fs :as fs]
     [isaac.google.events :as events]
+    [isaac.google.health :as health]
     [isaac.logger :as log]
     [isaac.module.berths :as berths]
     [isaac.module.discovery :as discovery]
     [isaac.nexus :as nexus]
+    [isaac.runner :as runner]
     [isaac.tool.memory :as memory])
   (:import (java.time Duration Instant)))
 
@@ -210,29 +212,59 @@
       :noop
       nil)))
 
+(defn- door-up? []
+  (boolean
+    (try
+      (or (runner/running?)
+          (some? ((requiring-resolve 'isaac.component.registry/instance-for) :http))
+          (some? ((requiring-resolve 'isaac.component.registry/instance-for) :server-runtime))
+          (some? ((requiring-resolve 'isaac.component.registry/instance-for) :google-registration)))
+      (catch Exception _ false))))
+
 (defn tick!
-  "One reconcile pass on the caller thread."
+  "One reconcile pass on the caller thread. Also evaluates health."
   ([] (tick! {}))
-  ([{:keys [now root]}]
-   (let [root  (or root (feature-root))
-         now   (or now (memory/now) (Instant/now))
-         _     (ensure-contributions!)
-         cfg   (load-cfg)
-         hours (renew-hours cfg)
-         listed (try
-                  (or (:subscriptions (events/list-subscriptions!)) [])
-                  (catch Exception _ []))]
-     (doseq [[_ entry] (all)]
+  ([{:keys [now root door-up?] :as opts}]
+   (let [up?     (if (contains? opts :door-up?) door-up? (door-up?))
+         root    (or root (feature-root))
+         now     (or now (memory/now) (Instant/now))
+         _       (ensure-contributions!)
+         cfg     (load-cfg)
+         hours   (renew-hours cfg)
+         listed  (try
+                   (or (:subscriptions (events/list-subscriptions!)) [])
+                   (catch Exception _ []))
+         entries (all)
+         remotes (if (seq entries)
+                   (apply merge (for [[_ entry] entries]
+                                  (remote-index (or listed []) (:expiry entry))))
+                   (remote-index (or listed []) nil))
+         keys    (vec (or (seq (mapcat (fn [[_ entry]] (call-keys entry)) entries))
+                          (sort (keys (or (:last-event-at (health/load-state root)) {})))))
+         h-state (health/load-state root)
+         conditions (health/evaluate {:now      now
+                                      :config   cfg
+                                      :keys     keys
+                                      :state    h-state
+                                      :remote   remotes
+                                      :door-up? up?})]
+     (health/log-conditions! conditions)
+     (doseq [[_ entry] entries]
        (let [configured (call-keys entry)
              remote     (remote-index (or listed []) (:expiry entry))
-             actions    (plan {:configured          configured
-                               :remote              remote
-                               :now                 now
-                               :renew-within-hours  hours})]
+             actions    (plan {:configured         configured
+                               :remote             remote
+                               :now                now
+                               :renew-within-hours hours})]
          (doseq [action actions]
            (try
              (execute! root entry action)
              (catch Exception e
                (log/error :google/registration-failed
                           :key (:key action)
-                          :reason (.getMessage e))))))))))
+                          :reason (.getMessage e)))))))
+     (health/apply! {:now        now
+                     :config     cfg
+                     :root       root
+                     :state      h-state
+                     :conditions conditions}))))

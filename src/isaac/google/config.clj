@@ -22,6 +22,13 @@
                  :service-account {:type        :string
                                    :description "Push subscription service account email."}}})
 
+(def health-schema
+  {:name        :google-health
+   :type        :map
+   :description "Silence threshold for Google health checks."
+   :schema      {:silent-after-hours {:type        :int
+                                      :description "Hours without an event before a registration is silent. Default 6."}}})
+
 (def google-schema
   {:name        :google
    :type        :map
@@ -32,5 +39,6 @@
                                        :description "Pub/Sub topic path (projects/<id>/topics/<name>)."}
                  :renew-within-hours {:type        :int
                                        :description "Hours before expiry at which the registration timer renews a subscription. Default 24."}
+                 :health              health-schema
                  :oauth               oauth-schema
                  :push                push-schema}})
