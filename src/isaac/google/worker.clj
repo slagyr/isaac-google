@@ -1,0 +1,32 @@
+(ns isaac.google.worker
+  "Inbox worker: drain pending records onto :isaac.google/handler contributions."
+  (:require
+    [isaac.google.handler :as handler]
+    [isaac.google.inbox :as inbox]
+    [isaac.logger :as log]
+    [isaac.nexus :as nexus]))
+
+(defn tick!
+  "Drain every pending record once on the caller thread."
+  ([]
+   (tick! (or (nexus/get :root))))
+  ([root]
+   (when root
+     (doseq [event (inbox/pending root)]
+       (let [message-id (:message-id event)
+             type       (:type event)
+             f          (handler/lookup type)]
+         (cond
+           (nil? f)
+           (log/warn :google/handler-missing :message-id message-id :type type)
+
+           :else
+           (try
+             (f event)
+             (inbox/mark-done! root message-id)
+             (catch Exception e
+               (log/error :google/handler-failed
+                          :message-id message-id
+                          :type type
+                          :error (.getMessage e))
+               (inbox/mark-failed! root message-id)))))))))

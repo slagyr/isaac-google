@@ -6,17 +6,25 @@
     [gherclj.core :as g :refer [defgiven defwhen defthen helper!]]
     [isaac.foundation.cli-steps :as fcli]
     [isaac.fs :as fs]
+    [cheshire.core :as json]
+    [isaac.google.handler :as google-handler]
+    [isaac.google.identity :as google-identity]
+    [isaac.google.inbox :as google-inbox]
     [isaac.google.token :as google-token]
+    [isaac.google.worker :as google-worker]
     [isaac.llm.auth.store :as auth-store]
     [isaac.llm.http :as llm-http]
     [isaac.module.discovery :as discovery]
-    [isaac.nexus :as nexus]))
+    [isaac.nexus :as nexus])
+  (:import
+    (java.util Base64)))
 
 (helper! isaac.google-steps)
 
 (g/after-scenario
   (fn []
-    (alter-var-root #'discovery/*foundation-index-override* (constantly nil))))
+    (alter-var-root #'discovery/*foundation-index-override* (constantly nil))
+    (reset! google-identity/skip-signature?* false)))
 
 (defn- feature-fs []
   (or (g/get :mem-fs) (nexus/get :fs) (fs/real-fs)))
@@ -162,3 +170,153 @@
 
 (defthen "the error mentions {text:string}"
   isaac.google-steps/error-mentions)
+
+(def ^:private received* (atom {}))
+(def ^:private throwers* (atom #{}))
+(def ^:private next-claims* (atom nil))
+
+(defn- b64url [bytes]
+  (.encodeToString (.withoutPadding (Base64/getUrlEncoder)) bytes))
+
+(defn- mint-token [claims]
+  (let [header  (b64url (.getBytes "{\"alg\":\"none\"}" "UTF-8"))
+        payload (b64url (.getBytes (json/generate-string claims) "UTF-8"))]
+    (str header "." payload ".")))
+
+(defn- default-claims []
+  {:aud   "https://isaac.example/google/pubsub"
+   :email "pubsub-push@marigold.iam.gserviceaccount.com"})
+
+(defn- handler-for [name]
+  (fn [event]
+    (when (contains? @throwers* name)
+      (throw (ex-info (str name " boom") {:handler name})))
+    (swap! received* update name (fnil conj []) event)))
+
+(defn google-signs-with-test-key []
+  (reset! google-identity/skip-signature?* true)
+  (reset! next-claims* nil)
+  (reset! received* {})
+  (reset! throwers* #{}))
+
+(defn skybeam-handles [event-type]
+  (google-handler/register-handler! [event-type (handler-for "skybeam")]))
+
+(defn longwave-handles [event-type]
+  (google-handler/register-handler! [event-type (handler-for "longwave")]))
+
+(defn skybeam-throws []
+  (swap! throwers* conj "skybeam"))
+
+(defn next-token-audience [aud]
+  (swap! next-claims* assoc :aud aud))
+
+(defn next-token-from [email]
+  (swap! next-claims* assoc :email email))
+
+(defn next-token-unsigned []
+  (swap! next-claims* assoc :unsigned? true))
+
+(defn- push-envelope [id ce-type data]
+  {:message {:messageId  id
+             :data       (.encodeToString (Base64/getEncoder) (.getBytes (or data "{}") "UTF-8"))
+             :attributes (cond-> {}
+                           ce-type (assoc "ce-type" ce-type))}})
+
+(defn google-pushes [id ce-type data]
+  (let [claims (merge (default-claims) @next-claims*)
+        token  (if (:unsigned? claims) "not-a-jwt" (mint-token (dissoc claims :unsigned?)))
+        _      (reset! next-claims* nil)
+        body   (json/generate-string (push-envelope id ce-type data))]
+    ((requiring-resolve 'isaac.http.server-steps/post-request-with-header-and-body)
+     "/google/pubsub"
+     (str "Authorization: Bearer " token)
+     body)))
+
+(defn google-pushes-gmail [id data]
+  (google-pushes id nil data))
+
+(defn fixture-route-unquoted
+  "Planner phrasing (isaac-1jep): GET /fixture requires scope :fixture/read —
+   isaac-http's quoted step does not match."
+  [method path scope]
+  ((requiring-resolve 'isaac.http.server-steps/fixture-route) method path scope))
+
+(defn google-pushes-to [path]
+  (let [claims (merge (default-claims) @next-claims*)
+        token  (mint-token claims)]
+    (reset! next-claims* nil)
+    ((requiring-resolve 'isaac.http.server-steps/get-request-with-header)
+     path
+     (str "Authorization: Bearer " token))))
+
+(defn inbox-worker-ticks []
+  (google-worker/tick! (feature-root)))
+
+(defn skybeam-received [id]
+  (g/should (some #(= id (:message-id %)) (get @received* "skybeam"))))
+
+(defn skybeam-received-once [id]
+  (g/should= 1 (count (filter #(= id (:message-id %)) (get @received* "skybeam")))))
+
+(defn skybeam-received-none []
+  (g/should (empty? (get @received* "skybeam"))))
+
+(defn longwave-received [id]
+  (g/should (some #(= id (:message-id %)) (get @received* "longwave"))))
+
+(defn inbox-holds [n id]
+  (let [n (if (string? n) (parse-long n) n)
+        records (filter #(= id (:message-id %)) (google-inbox/pending (feature-root)))]
+    (g/should= n (count records))))
+
+(defgiven "Google signs push tokens with a test key"
+  isaac.google-steps/google-signs-with-test-key)
+
+(defgiven #"the skybeam fixture module handles Google events of type \"([^\"]+)\""
+  isaac.google-steps/skybeam-handles)
+
+(defgiven #"the longwave fixture module handles Google events of type \"([^\"]+)\""
+  isaac.google-steps/longwave-handles)
+
+(defgiven "the skybeam handler throws"
+  isaac.google-steps/skybeam-throws)
+
+(defgiven #"the next push token has audience \"([^\"]+)\""
+  isaac.google-steps/next-token-audience)
+
+(defgiven #"the next push token is from \"([^\"]+)\""
+  isaac.google-steps/next-token-from)
+
+(defgiven "the next push token is unsigned"
+  isaac.google-steps/next-token-unsigned)
+
+(defgiven #"a fixture route (\w+) (/[^\s]+) requires scope :([^\s]+)$"
+  isaac.google-steps/fixture-route-unquoted)
+
+(defwhen #"Google pushes message \"([^\"]+)\" of type \"([^\"]+)\" with data:"
+  isaac.google-steps/google-pushes)
+
+(defwhen #"Google pushes a Gmail watch message \"([^\"]+)\" with data:"
+  isaac.google-steps/google-pushes-gmail)
+
+(defwhen #"Google pushes to GET (/[^\"]*)"
+  isaac.google-steps/google-pushes-to)
+
+(defwhen "the inbox worker ticks"
+  isaac.google-steps/inbox-worker-ticks)
+
+(defthen #"the skybeam handler received message \"([^\"]+)\""
+  isaac.google-steps/skybeam-received)
+
+(defthen #"the skybeam handler received message \"([^\"]+)\" once"
+  isaac.google-steps/skybeam-received-once)
+
+(defthen "the skybeam handler received no messages"
+  isaac.google-steps/skybeam-received-none)
+
+(defthen #"the longwave handler received message \"([^\"]+)\""
+  isaac.google-steps/longwave-received)
+
+(defthen #"the inbox holds (\d+) record for message \"([^\"]+)\""
+  isaac.google-steps/inbox-holds)

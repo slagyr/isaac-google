@@ -1,5 +1,5 @@
 {:id          :isaac.google
- :version     "0.1.0"
+ :version     "0.1.1"
  :builtin?    true
  :factory     isaac.google.module/create-module
  :description "Shared Google Workspace plumbing for Isaac — OAuth for the Google user, the Pub/Sub push door and durable inbox, registrations and renewal, health. Knows nothing of Chat or Gmail."
@@ -8,9 +8,23 @@
  {:isaac.google/scopes
   {:description "OAuth scopes the Google user login requests. Each consumer contributes the scopes it needs; isaac-google unions them (always including openid) when building the authorization URL."
    :schema      {:type :seq
-                 :spec {:type :string}}}}
+                 :spec {:type :string}}}
+  :isaac.google/handler
+  {:description "Pub/Sub event handlers keyed on event type (Chat ce-type or gmail/watch). Each contribution is [type handler]."
+   :schema      {:type       :map
+                 :key-spec   {:type :string}
+                 :value-spec {:type    :any
+                              :factory isaac.google.handler/register-handler!}}}}
 
  :isaac.google/scopes ["openid"]
+
+ :isaac.http/identity [isaac.google.identity/verify]
+
+ :isaac.http/route
+ [{:method  :post
+   :path    "/google/pubsub"
+   :handler isaac.google.http/handler
+   :scope   :google/push}]
 
  :isaac/cli
  {:google {:usage     "google <subcommand> [options]"
@@ -35,5 +49,12 @@
                                                                           :validations [:present?]
                                                                           :description "OAuth client secret. Prefer ${GOOGLE_CLIENT_SECRET} from .env — never plaintext."}
                                                           :account       {:type        :string
-                                                                          :description "Google account the tokens belong to (e.g. yopp@tonotop.com)."}}}}}}}
+                                                                          :description "Google account the tokens belong to (e.g. yopp@tonotop.com)."}}}
+                                  :push   {:name        :google-push
+                                           :type        :map
+                                           :description "Pub/Sub push door."
+                                           :schema      {:endpoint        {:type        :string
+                                                                           :description "HTTPS URL Google POSTs to (aud of the OIDC token)."}
+                                                         :service-account {:type        :string
+                                                                           :description "Push subscription service account email."}}}}}}}
 }

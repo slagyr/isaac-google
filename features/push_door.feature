@@ -1,4 +1,3 @@
-@wip
 Feature: Google Pub/Sub push door
   Google pushes every subscription's events to one Isaac door. The door
   is an identity source under per-principal auth (isaac-gym1): a valid
