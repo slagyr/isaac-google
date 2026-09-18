@@ -1,0 +1,5 @@
+{:id          :marigold.skybeam
+ :version     "0.0.0"
+ :factory     isaac.module.protocol/module
+ :description "Marigold fixture: contributes a Google OAuth scope for login tests."
+ :isaac.google/scopes ["https://www.googleapis.com/auth/chat.messages.readonly"]}

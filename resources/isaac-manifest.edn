@@ -1,5 +1,39 @@
-{:id       :isaac.google
- :version  "0.1.0"
- :builtin? true
- :factory  isaac.google.module/create-module
- :description "Shared Google Workspace plumbing for Isaac — OAuth for the Google user, the Pub/Sub push door and durable inbox, registrations and renewal, health. Knows nothing of Chat or Gmail."}
+{:id          :isaac.google
+ :version     "0.1.0"
+ :builtin?    true
+ :factory     isaac.google.module/create-module
+ :description "Shared Google Workspace plumbing for Isaac — OAuth for the Google user, the Pub/Sub push door and durable inbox, registrations and renewal, health. Knows nothing of Chat or Gmail."
+
+ :berths
+ {:isaac.google/scopes
+  {:description "OAuth scopes the Google user login requests. Each consumer contributes the scopes it needs; isaac-google unions them (always including openid) when building the authorization URL."
+   :schema      {:type :seq
+                 :spec {:type :string}}}}
+
+ :isaac.google/scopes ["openid"]
+
+ :isaac/cli
+ {:google {:usage     "google <subcommand> [options]"
+           :summary   "Google user login and shared Workspace plumbing"
+           :namespace isaac.google.cli}}
+
+ :isaac.config/schema
+ {:google {:schema {:name        :google
+                    :type        :map
+                    :description "Shared Google Workspace plumbing — OAuth, Pub/Sub topic, GCP project."
+                    :schema      {:project {:type        :string
+                                            :description "GCP project id that owns the Pub/Sub topic."}
+                                  :topic   {:type        :string
+                                            :description "Pub/Sub topic path (projects/<id>/topics/<name>)."}
+                                  :oauth   {:name        :google-oauth
+                                            :type        :map
+                                            :description "OAuth client for the Google user (authorization-code flow)."
+                                            :schema      {:client-id     {:type        :string
+                                                                          :validations [:present?]
+                                                                          :description "OAuth client id from Google Cloud Console."}
+                                                          :client-secret {:type        :string
+                                                                          :validations [:present?]
+                                                                          :description "OAuth client secret. Prefer ${GOOGLE_CLIENT_SECRET} from .env — never plaintext."}
+                                                          :account       {:type        :string
+                                                                          :description "Google account the tokens belong to (e.g. yopp@tonotop.com)."}}}}}}}
+}

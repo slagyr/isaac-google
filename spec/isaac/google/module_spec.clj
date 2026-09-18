@@ -14,4 +14,15 @@
     (should (satisfies? isaac.module.protocol/Module (sut/create-module))))
 
   (it "declares its module id"
-    (should= :isaac.google (:id manifest))))
+    (should= :isaac.google (:id manifest)))
+
+  (it "contributes the google CLI command"
+    (should= 'isaac.google.cli (get-in manifest [:isaac/cli :google :namespace])))
+
+  (it "declares the google config table"
+    (should= :map (get-in manifest [:isaac.config/schema :google :schema :type])))
+
+  (it "declares the scopes berth and contributes openid"
+    (should= :seq (get-in manifest [:berths :isaac.google/scopes :schema :type]))
+    (should= ["openid"] (:isaac.google/scopes manifest)))
+  )

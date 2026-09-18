@@ -1,4 +1,3 @@
-@wip
 Feature: Google user login
   isaac-google signs in as the Google user with the authorization-code
   flow and keeps the tokens in the auth store under provider "google".
