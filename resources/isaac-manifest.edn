@@ -1,5 +1,5 @@
 {:id          :isaac.google
- :version     "0.1.5"
+ :version     "0.1.6"
  :builtin?    true
  :factory     isaac.google.module/create-module
  :description "Shared Google Workspace plumbing for Isaac — OAuth for the Google user, the Pub/Sub push door and durable inbox, registrations and renewal, health. Knows nothing of Chat or Gmail."
