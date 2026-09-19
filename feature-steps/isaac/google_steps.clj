@@ -10,11 +10,12 @@
     [isaac.google.events :as google-events]
     [isaac.google.handler :as google-handler]
     [isaac.google.health :as google-health]
-    [isaac.google.identity :as google-identity]
     [isaac.google.inbox :as google-inbox]
     [isaac.google.registration :as google-registration]
     [isaac.google.token :as google-token]
     [isaac.google.worker :as google-worker]
+    [isaac.http.oidc :as oidc]
+    [isaac.http.oidc-fixture :as oidc-fixture]
     [isaac.tool.memory :as memory]
     [isaac.llm.auth.store :as auth-store]
     [isaac.llm.http :as llm-http]
@@ -33,7 +34,6 @@
 (g/after-scenario
   (fn []
     (alter-var-root #'discovery/*foundation-index-override* (constantly nil))
-    (reset! google-identity/skip-signature?* false)
     (reset! events-state* default-events-state)
     (google-registration/reset-registrations!)))
 
@@ -186,17 +186,46 @@
 (def ^:private throwers* (atom #{}))
 (def ^:private next-claims* (atom nil))
 
-(defn- b64url [bytes]
-  (.encodeToString (.withoutPadding (Base64/getUrlEncoder)) bytes))
+;; ----- Google's push tokens -----
+;; Google signs push tokens with a key published at its JWKS URL. The harness
+;; plays Google: one RSA key pair, a JWKS stub on isaac-http's fetch seam, and
+;; tokens minted with isaac-http's fixture (isaac.http.oidc-fixture).
 
-(defn- mint-token [claims]
-  (let [header  (b64url (.getBytes "{\"alg\":\"none\"}" "UTF-8"))
-        payload (b64url (.getBytes (json/generate-string claims) "UTF-8"))]
-    (str header "." payload ".")))
+(def ^:private GOOGLE-KID "google-1")
+(def ^:private google-keys* (atom nil))
+(def ^:private jwks-hits* (atom 0))
+
+(defn- google-keys []
+  (or @google-keys* (reset! google-keys* (oidc-fixture/generate-rsa))))
+
+(defn- google-jwks []
+  {:keys [(oidc-fixture/rsa-jwk (:public (google-keys)) GOOGLE-KID)]})
+
+(defn- serve-jwks! [doc-fn]
+  (reset! jwks-hits* 0)
+  (oidc/reset-jwks-cache!)
+  (alter-var-root #'oidc/*fetch-jwks*
+                  (constantly (fn [_url] (doc-fn (swap! jwks-hits* inc))))))
 
 (defn- default-claims []
-  {:aud   "https://isaac.example/google/pubsub"
-   :email "pubsub-push@marigold.iam.gserviceaccount.com"})
+  (let [now (.getEpochSecond (java.time.Instant/now))]
+    {:iss            "https://accounts.google.com"
+     :aud            "https://isaac.example/google/pubsub"
+     :email          "pubsub-push@marigold.iam.gserviceaccount.com"
+     :email_verified true
+     :iat            now
+     :exp            (+ now 3600)}))
+
+(defn- mint-token
+  "A push token as Google would mint it, unless the scenario asked for a bad one."
+  [claims]
+  (let [{:keys [unsigned? foreign-key?]} claims
+        claims (dissoc claims :unsigned? :foreign-key?)]
+    (cond
+      unsigned?    (str (oidc-fixture/b64url (.getBytes "{\"alg\":\"none\",\"kid\":\"google-1\"}" "UTF-8"))
+                        "." (oidc-fixture/b64url (.getBytes (json/generate-string claims) "UTF-8")) ".")
+      foreign-key? (oidc-fixture/sign-rs256 (:private (oidc-fixture/generate-rsa)) {:kid GOOGLE-KID} claims)
+      :else        (oidc-fixture/sign-rs256 (:private (google-keys)) {:kid GOOGLE-KID} claims))))
 
 (defn- handler-for [name]
   (fn [event]
@@ -205,10 +234,20 @@
     (swap! received* update name (fnil conj []) event)))
 
 (defn google-signs-with-test-key []
-  (reset! google-identity/skip-signature?* true)
+  (google-keys)
+  (serve-jwks! (fn [_hit] {:status 200 :body (google-jwks) :headers {}}))
   (reset! next-claims* nil)
   (reset! received* {})
   (reset! throwers* #{}))
+
+(defn google-jwks-unreachable []
+  (serve-jwks! (fn [_hit] {:status 503 :body nil :headers {}})))
+
+(defn google-jwks-misses-then-serves []
+  (serve-jwks! (fn [hit] {:status 200 :body (if (= 1 hit) {:keys []} (google-jwks)) :headers {}})))
+
+(defn google-jwks-fetched-times [n]
+  (g/should= (long n) (long @jwks-hits*)))
 
 (defn skybeam-handles [event-type]
   (google-handler/register-handler! [event-type (handler-for "skybeam")]))
@@ -228,24 +267,41 @@
 (defn next-token-unsigned []
   (swap! next-claims* assoc :unsigned? true))
 
+(defn next-token-foreign-key []
+  (swap! next-claims* assoc :foreign-key? true))
+
+(defn next-token-expired []
+  (swap! next-claims* assoc :exp (- (.getEpochSecond (java.time.Instant/now)) 600)))
+
+(defn next-token-issuer [iss]
+  (swap! next-claims* assoc :iss iss))
+
 (defn- push-envelope [id ce-type data]
   {:message {:messageId  id
              :data       (.encodeToString (Base64/getEncoder) (.getBytes (or data "{}") "UTF-8"))
              :attributes (cond-> {}
                            ce-type (assoc "ce-type" ce-type))}})
 
+(def ^:private GOOGLE-PUSH-IP "35.191.0.10")
+
 (defn google-pushes [id ce-type data]
   (let [claims (merge (default-claims) @next-claims*)
-        token  (if (:unsigned? claims) "not-a-jwt" (mint-token (dissoc claims :unsigned?)))
+        token  (mint-token claims)
         _      (reset! next-claims* nil)
         body   (json/generate-string (push-envelope id ce-type data))]
+    ;; Pushes arrive through the public front (Funnel), so the origin is forwarded.
     ((requiring-resolve 'isaac.http.server-steps/post-request-with-header-and-body)
      "/google/pubsub"
-     (str "Authorization: Bearer " token)
+     (str "Authorization: Bearer " token "; X-Forwarded-For: " GOOGLE-PUSH-IP)
      body)))
 
 (defn google-pushes-gmail [id data]
   (google-pushes id nil data))
+
+(defn google-pushes-forged [n]
+  (dotimes [i (if (string? n) (parse-long n) n)]
+    (next-token-foreign-key)
+    (google-pushes (str "forged-" i) "google.workspace.chat.message.v1.created" "{}")))
 
 (defn fixture-route-unquoted
   "Planner phrasing (isaac-1jep): GET /fixture requires scope :fixture/read —
@@ -301,6 +357,27 @@
 
 (defgiven "the next push token is unsigned"
   isaac.google-steps/next-token-unsigned)
+
+(defgiven "the next push token is signed by a key Google never published"
+  isaac.google-steps/next-token-foreign-key)
+
+(defgiven "the next push token is expired"
+  isaac.google-steps/next-token-expired)
+
+(defgiven #"the next push token is issued by \"([^\"]+)\""
+  isaac.google-steps/next-token-issuer)
+
+(defgiven "Google's JWKS is unreachable"
+  isaac.google-steps/google-jwks-unreachable)
+
+(defgiven "Google's JWKS misses the kid then serves it"
+  isaac.google-steps/google-jwks-misses-then-serves)
+
+(defthen "Google's JWKS was fetched {n:int} times"
+  isaac.google-steps/google-jwks-fetched-times)
+
+(defwhen "Google pushes {n:int} messages with forged tokens"
+  isaac.google-steps/google-pushes-forged)
 
 (defgiven #"a fixture route (\w+) (/[^\s]+) requires scope :([^\s]+)$"
   isaac.google-steps/fixture-route-unquoted)

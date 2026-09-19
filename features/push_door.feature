@@ -1,10 +1,14 @@
 Feature: Google Pub/Sub push door
   Google pushes every subscription's events to one Isaac door. The door
-  is an identity source under per-principal auth (isaac-gym1): a valid
-  Google OIDC token for the door's audience is principal google-pubsub
-  with scope :google/push and nothing more. Accepted events are persisted
-  and answered 204 before any handler runs; an inbox worker hands them to
-  the handler a module contributed for the event type. Bean: isaac-1jep.
+  is an identity source under per-principal auth (isaac-gym1): Google's
+  OIDC token for this door — signed by a key at Google's JWKS, issued by
+  accounts.google.com, audience the configured endpoint, from the
+  configured push service account — is principal google-pubsub with scope
+  :google/push and nothing more. isaac-http owns the verification
+  (isaac-4sqh); this module contributes the trust rule. Accepted events are
+  persisted and answered 204 before any handler runs; an inbox worker hands
+  them to the handler a module contributed for the event type.
+  Beans: isaac-1jep, isaac-x37l.
 
   Background:
     Given an Isaac root at "target/test-state"
@@ -39,21 +43,93 @@ Feature: Google Pub/Sub push door
       """
     Then the response status is 401
     And the isaac file "google/inbox/pending/m-2.edn" does not exist
+    And the log has entries matching:
+      | event         | reason    |
+      | :auth/refused | :audience |
     Given the next push token is from "someone-else@marigold.iam.gserviceaccount.com"
     When Google pushes message "m-3" of type "google.workspace.chat.message.v1.created" with data:
       """
       {}
       """
     Then the response status is 401
+    And the log has entries matching:
+      | event         | reason  |
+      | :auth/refused | :claims |
     Given the next push token is unsigned
     When Google pushes message "m-4" of type "google.workspace.chat.message.v1.created" with data:
       """
       {}
       """
     Then the response status is 401
+    And the log has entries matching:
+      | event         | reason     |
+      | :auth/refused | :signature |
     And the log has no entries matching:
       | level | event                 |
       | :info | :google/push-received |
+
+  Scenario: the right claims under a signature Google never made are refused
+    Given the next push token is signed by a key Google never published
+    When Google pushes message "m-8" of type "google.workspace.chat.message.v1.created" with data:
+      """
+      {}
+      """
+    Then the response status is 401
+    And the isaac file "google/inbox/pending/m-8.edn" does not exist
+    And the log has entries matching:
+      | event         | reason     |
+      | :auth/refused | :signature |
+
+  Scenario: an expired token and a token from another issuer are refused
+    Given the next push token is expired
+    When Google pushes message "m-9" of type "google.workspace.chat.message.v1.created" with data:
+      """
+      {}
+      """
+    Then the response status is 401
+    And the log has entries matching:
+      | event         | reason   |
+      | :auth/refused | :expired |
+    Given the next push token is issued by "https://accounts.impostor.test"
+    When Google pushes message "m-10" of type "google.workspace.chat.message.v1.created" with data:
+      """
+      {}
+      """
+    Then the response status is 401
+    And the log has entries matching:
+      | event         | reason   |
+      | :auth/refused | :unknown |
+    And the isaac file "google/inbox/pending/m-10.edn" does not exist
+
+  Scenario: Google's JWKS unreachable fails closed
+    Given Google's JWKS is unreachable
+    When Google pushes message "m-11" of type "google.workspace.chat.message.v1.created" with data:
+      """
+      {}
+      """
+    Then the response status is 401
+    And the isaac file "google/inbox/pending/m-11.edn" does not exist
+    And the log has entries matching:
+      | event         | reason            |
+      | :auth/refused | :jwks-unavailable |
+
+  Scenario: a key Google rotated in is fetched once and then trusted
+    Given Google's JWKS misses the kid then serves it
+    When Google pushes message "m-12" of type "google.workspace.chat.message.v1.created" with data:
+      """
+      {"message": {"name": "spaces/AAA/messages/12"}}
+      """
+    Then the response status is 204
+    And Google's JWKS was fetched 2 times
+
+  Scenario: forged pushes count toward burst control like any other refused request
+    When Google pushes 10 messages with forged tokens
+    And Google pushes message "m-13" of type "google.workspace.chat.message.v1.created" with data:
+      """
+      {"message": {"name": "spaces/AAA/messages/13"}}
+      """
+    Then the response status is 429
+    And the isaac file "google/inbox/pending/m-13.edn" does not exist
 
   Scenario: a Google token opens only the door
     Given a fixture route GET /fixture requires scope :fixture/read

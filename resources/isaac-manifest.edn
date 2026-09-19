@@ -1,5 +1,5 @@
 {:id          :isaac.google
- :version     "0.1.2"
+ :version     "0.1.3"
  :builtin?    true
  :factory     isaac.google.module/create-module
  :description "Shared Google Workspace plumbing for Isaac — OAuth for the Google user, the Pub/Sub push door and durable inbox, registrations and renewal, health. Knows nothing of Chat or Gmail."
@@ -28,7 +28,17 @@
 
  :isaac.google/scopes ["openid"]
 
- :isaac.http/identity [isaac.google.identity/verify]
+ ;; The Pub/Sub push door's identity: Google's OIDC token for this door.
+ ;; isaac-http owns the crypto (JWKS, signature, iss/aud/exp); this is the trust rule.
+ ;; :audience and :email are config refs — the deployment's own endpoint and push
+ ;; service account — so the rule is inert until google.push is configured.
+ :isaac.http/identity
+ {:google-pubsub {:issuer    "https://accounts.google.com"
+                  :jwks      "https://www.googleapis.com/oauth2/v3/certs"
+                  :audience  [:google :push :endpoint]
+                  :claims    {:email          [:google :push :service-account]
+                              :email_verified true}
+                  :principal {:name :google-pubsub :scopes #{:google/push}}}}
 
  :isaac.http/route
  [{:method  :post
