@@ -145,14 +145,23 @@
   (try
     (let [root   (derive-root opts)
           fs*    (feature-fs opts)
+          configured (nexus/-with-nested-nexus {:fs fs* :root root} (configured-keys))
           state  (nexus/-with-nested-nexus {:fs fs* :root root}
                    (health/load-state root))
           listed (try
                    (or (:subscriptions (events/list-subscriptions!)) [])
                    (catch Exception _ []))
-          remote (or (not-empty (remote-index listed))
-                     (registration/load-state root))
-          keys   (vec (or (seq (configured-keys))
+          ;; Entries that bring their own :remote (the Gmail watch — Google
+          ;; cannot list it) are merged over the Workspace Events listing.
+          own    (nexus/-with-nested-nexus {:fs fs* :root root}
+                   (apply merge {}
+                          (for [[_ entry] (registration/all)
+                                :when (fn? (:remote entry))]
+                            (try ((:remote entry)) (catch Exception _ {})))))
+          remote (merge (or (not-empty (remote-index listed))
+                            (registration/load-state root))
+                        own)
+          keys   (vec (or (seq configured)
                           (sort (keys (or (:last-event-at state) {})))
                           (sort (keys remote))))
           lines  (health/status-lines {:keys   keys

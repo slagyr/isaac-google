@@ -46,11 +46,24 @@
       (error-result status parsed)
       parsed)))
 
-(defn list-subscriptions! []
-  (request! {:method :get :url (str BASE "/subscriptions")}))
+(def LIST-FILTER
+  "subscriptions.list refuses a request without a filter naming at least one event
+   type (400 'Invalid or unsupported query filter'). Every Chat subscription we
+   create carries message.created, so filtering on it lists them all."
+  "event_types:\"google.workspace.chat.message.v1.created\"")
 
-(defn create-subscription! [body]
-  (request! {:method :post :url (str BASE "/subscriptions") :body body}))
+(defn list-subscriptions! []
+  (request! {:method :get :url (str BASE "/subscriptions") :query {:filter LIST-FILTER}}))
+
+(defn create-subscription!
+  "subscriptions.create answers with a long-running Operation. When it is already
+   done the subscription rides inside :response; hand that back so the caller sees
+   the subscription's name and expireTime, not operations/…."
+  [body]
+  (let [result (request! {:method :post :url (str BASE "/subscriptions") :body body})]
+    (if (and (map? result) (map? (:response result)))
+      (merge (dissoc result :name :response :done :metadata) (:response result))
+      result)))
 
 (defn renew-subscription! [name]
   (request! {:method :patch

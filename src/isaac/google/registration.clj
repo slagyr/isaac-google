@@ -231,8 +231,10 @@
 (defn tick!
   "One reconcile pass on the caller thread. Also evaluates health."
   ([] (tick! {}))
-  ([{:keys [now root door-up?] :as opts}]
-   (let [up?     (if (contains? opts :door-up?) door-up? (door-up?))
+  ([{:keys [now root] :as opts}]
+   ;; :door-up? is read from opts explicitly — a destructured local of the
+   ;; same name would shadow the door-up? fn, and the scheduler calls (tick! {}).
+   (let [up?     (if (contains? opts :door-up?) (:door-up? opts) (door-up?))
          root    (or root (feature-root))
          now     (or now (memory/now) (Instant/now))
          _       (ensure-contributions!)

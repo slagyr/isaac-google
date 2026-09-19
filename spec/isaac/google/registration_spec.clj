@@ -104,6 +104,11 @@
       (sut/tick! {:now now :root root :door-up? true})
       (should= [[:renew "yopp@tonotop.com"]] @@calls))
 
+    (it "ticks with no :door-up? in opts the way the scheduler calls it, deciding door state itself"
+      (sut/register! [:gmail-watch @entry])
+      (should-not-throw (sut/tick! {:root root}))
+      (should= [[:create "yopp@tonotop.com"]] @@calls))
+
     (it "stops through :delete! when the key left config"
       (sut/register! [:gmail-watch (assoc @entry :key (fn [] []) :remote (fn [] (sut/load-state root)))])
       (sut/save-state! root {"yopp@tonotop.com" {:name "yopp@tonotop.com" :expires-at "2026-09-24T12:00:00Z"}})
