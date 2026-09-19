@@ -1,5 +1,5 @@
 {:id          :isaac.google
- :version     "0.1.3"
+ :version     "0.1.4"
  :builtin?    true
  :factory     isaac.google.module/create-module
  :description "Shared Google Workspace plumbing for Isaac — OAuth for the Google user, the Pub/Sub push door and durable inbox, registrations and renewal, health. Knows nothing of Chat or Gmail."
@@ -16,7 +16,7 @@
                  :value-spec {:type    :any
                               :factory isaac.google.handler/register-handler!}}}
   :isaac.google/registration
-  {:description "Workspace Events subscriptions to create and renew. Each contribution is {:create! :renew! :expiry :key}."
+  {:description "Registrations with Google to create and renew on the shared timer. Each contribution is {:create! :renew! :expiry :key} — plus, for registrations Google cannot list (Gmail watch), :remote (fn [] -> {key {:name :expires-at}}, usually the timer's own persisted state) and :delete! (fn [name])."
    :schema      {:type       :map
                  :key-spec   {:type :keyword}
                  :value-spec {:type    :map
@@ -24,7 +24,9 @@
                               :schema  {:create! {:type :symbol}
                                         :renew!  {:type :symbol}
                                         :expiry  {:type :symbol}
-                                        :key     {:type :symbol}}}}}}
+                                        :key     {:type :symbol}
+                                        :remote  {:type :symbol}
+                                        :delete! {:type :symbol}}}}}}
 
  :isaac.google/scopes ["openid"]
 

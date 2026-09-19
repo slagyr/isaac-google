@@ -1,6 +1,8 @@
 (ns isaac.google.registration-spec
   (:require
     [isaac.fs :as fs]
+    [isaac.google.events]
+    [isaac.google.health]
     [isaac.google.registration :as sut]
     [isaac.nexus :as nexus]
     [speclj.core :refer :all])
@@ -65,5 +67,48 @@
         (sut/save-state! root state)
         (should (fs/exists? (fs/instance) (str root "/google/registrations.edn")))
         (should= state (sut/load-state root))))
+    )
+
+  (context "an entry Google cannot list (:remote and :delete! hooks)"
+
+    (with calls (atom []))
+    (with entry (let [calls @calls]
+                  {:create! (fn [k] (swap! calls conj [:create k])
+                              {:name k :expiration "1790424000000"})
+                   :renew!  (fn [n] (swap! calls conj [:renew n])
+                              {:name n :expiration "1790424000000"})
+                   :expiry  (fn [r] (some-> (:expiration r) parse-long Instant/ofEpochMilli))
+                   :key     (fn [] ["yopp@tonotop.com"])
+                   :remote  (fn [] (select-keys (sut/load-state root) ["yopp@tonotop.com"]))
+                   :delete! (fn [n] (swap! calls conj [:stop n]))}))
+
+    (around [example]
+      (sut/reset-registrations!)
+      (nexus/-with-nexus {:root root :fs (fs/mem-fs)}
+        (with-redefs [isaac.google.events/list-subscriptions! (fn [] {:subscriptions []})
+                      isaac.google.health/apply! (fn [_] nil)]
+          (example)))
+      (sut/reset-registrations!))
+
+    (it "creates on the first tick, remembers the expiry, and does not create again"
+      (sut/register! [:gmail-watch @entry])
+      (sut/tick! {:now now :root root :door-up? true})
+      (should= [[:create "yopp@tonotop.com"]] @@calls)
+      (should= "2026-09-26T12:00:00Z" (get-in (sut/load-state root) ["yopp@tonotop.com" :expires-at]))
+      (sut/tick! {:now now :root root :door-up? true})
+      (should= [[:create "yopp@tonotop.com"]] @@calls))
+
+    (it "renews through :renew! once the remembered expiry is inside the window"
+      (sut/register! [:gmail-watch @entry])
+      (sut/save-state! root {"yopp@tonotop.com" {:name "yopp@tonotop.com" :expires-at "2026-09-19T06:00:00Z"}})
+      (sut/tick! {:now now :root root :door-up? true})
+      (should= [[:renew "yopp@tonotop.com"]] @@calls))
+
+    (it "stops through :delete! when the key left config"
+      (sut/register! [:gmail-watch (assoc @entry :key (fn [] []) :remote (fn [] (sut/load-state root)))])
+      (sut/save-state! root {"yopp@tonotop.com" {:name "yopp@tonotop.com" :expires-at "2026-09-24T12:00:00Z"}})
+      (sut/tick! {:now now :root root :door-up? true})
+      (should= [[:stop "yopp@tonotop.com"]] @@calls)
+      (should= {} (sut/load-state root)))
     )
   )

@@ -32,14 +32,19 @@
     :else x))
 
 (defn register!
-  "Per-entry factory. Entry is [id {:create! :renew! :expiry :key}]."
+  "Per-entry factory. Entry is [id {:create! :renew! :expiry :key}] plus two
+   optional hooks for registrations Google cannot list: :remote (fn [] ->
+   {key {:name :expires-at}}, defaults to the Workspace Events listing) and
+   :delete! (fn [name], defaults to deleting the Workspace Events subscription)."
   [[id entry]]
   (swap! registrations* assoc id
          (-> entry
              (update :create! resolve-sym)
              (update :renew! resolve-sym)
              (update :expiry resolve-sym)
-             (update :key resolve-sym)))
+             (update :key resolve-sym)
+             (update :remote resolve-sym)
+             (update :delete! resolve-sym)))
   id)
 
 (defn all []
@@ -205,7 +210,9 @@
 
       :delete
       (do
-        (events/delete-subscription! (:name action))
+        (if-let [delete! (:delete! entry)]
+          (delete! (:name action))
+          (events/delete-subscription! (:name action)))
         (forget! root (:key action))
         (log/info :google/unregistered :key (:key action)))
 
@@ -235,9 +242,12 @@
                    (or (:subscriptions (events/list-subscriptions!)) [])
                    (catch Exception _ []))
          entries (all)
+         remote-for (fn [entry]
+                      (if-let [remote (:remote entry)]
+                        (or (remote) {})
+                        (remote-index (or listed []) (:expiry entry))))
          remotes (if (seq entries)
-                   (apply merge (for [[_ entry] entries]
-                                  (remote-index (or listed []) (:expiry entry))))
+                   (apply merge (for [[_ entry] entries] (remote-for entry)))
                    (remote-index (or listed []) nil))
          keys    (vec (or (seq (mapcat (fn [[_ entry]] (call-keys entry)) entries))
                           (sort (keys (or (:last-event-at (health/load-state root)) {})))))
@@ -251,7 +261,7 @@
      (health/log-conditions! conditions)
      (doseq [[_ entry] entries]
        (let [configured (call-keys entry)
-             remote     (remote-index (or listed []) (:expiry entry))
+             remote     (remote-for entry)
              actions    (plan {:configured         configured
                                :remote             remote
                                :now                now
