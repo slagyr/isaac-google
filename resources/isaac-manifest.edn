@@ -1,5 +1,5 @@
 {:id          :isaac.google
- :version     "0.1.7"
+ :version     "0.1.8"
  :builtin?    true
  :factory     isaac.google.module/create-module
  :description "Shared Google Workspace plumbing for Isaac — OAuth for the Google user, the Pub/Sub push door and durable inbox, registrations and renewal, health. Knows nothing of Chat or Gmail."
@@ -31,6 +31,11 @@
  ;; directory.readonly lets isaac.google.people ask the Workspace directory for a
  ;; user's email: Chat never gives one for a human sender (isaac-8s6s).
  :isaac.google/scopes ["openid" "https://www.googleapis.com/auth/directory.readonly"]
+
+ ;; Who is this person? The agent asks Google with Isaac's own token, rather
+ ;; than a crew shelling out to another CLI with its own grant (isaac-jqk2).
+ :isaac.agent/tools
+ {:google__whois {:factory isaac.google.tools/whois-tool-factory}}
 
  ;; The Pub/Sub push door's identity: Google's OIDC token for this door.
  ;; isaac-http owns the crypto (JWKS, signature, iss/aud/exp); this is the trust rule.
