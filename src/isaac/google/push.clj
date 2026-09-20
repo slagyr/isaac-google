@@ -1,7 +1,8 @@
 (ns isaac.google.push
   "Unwrap a Pub/Sub push envelope into an inbox event."
   (:require
-    [cheshire.core :as json])
+    [cheshire.core :as json]
+    [isaac.google.tenants :as tenants])
   (:import
     (java.util Base64)))
 
@@ -22,7 +23,11 @@
         "gmail/watch")))
 
 (defn unwrap
-  "Turn a Pub/Sub push JSON body into {:message-id :type :data :publish-time}."
+  "Turn a Pub/Sub push JSON body into
+   {:message-id :type :data :publish-time :subscription}.
+
+   The subscription name is kept because it names the project that sent the
+   push, and the project is the Google organization — the tenant (isaac-1zkz)."
   [body]
   (let [message     (or (:message body) (get body "message"))
         message-id  (or (:messageId message) (get message "messageId"))
@@ -32,4 +37,5 @@
     {:message-id   message-id
      :type         (event-type attributes data)
      :data         data
-     :publish-time publish}))
+     :publish-time publish
+     :subscription (tenants/subscription-of body)}))

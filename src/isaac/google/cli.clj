@@ -1,4 +1,11 @@
 (ns isaac.google.cli
+  "`isaac google login` and `isaac google status`.
+
+   Both are per organization: a tenant has its own OAuth client and its own
+   Google user, so its tokens are stored under its own provider key and
+   `--tenant` says which one is signing in. A single-organization host names
+   no tenant and nothing about it changes; a host with several sees its
+   status grouped by tenant (isaac-1zkz)."
   (:require
     [clojure.string :as str]
     [clojure.tools.cli :as tools-cli]
@@ -13,14 +20,15 @@
     [isaac.google.oauth :as oauth]
     [isaac.google.registration :as registration]
     [isaac.google.scopes :as scopes]
+    [isaac.google.tenants :as tenants]
     [isaac.llm.auth.store :as auth-store]
     [isaac.nexus :as nexus]))
 
-(def PROVIDER "google")
 (def REDIRECT-URI "http://localhost:1/")
 
 (def option-spec
   [[nil "--code CODE" "Authorization code pasted from the Google consent screen"]
+   [nil "--tenant TENANT" "Google organization to sign in as (default: the only one configured)"]
    ["-h" "--help" "Show help"]])
 
 (defn- derive-root [opts]
@@ -39,24 +47,38 @@
           (:config opts))
         (loader/load-config! root fs* "google cli"))))
 
-(defn- oauth-from [config]
-  (get-in config [:google :oauth]))
+(defn- tenant-id
+  "Which organization this invocation is for: --tenant when given, else the
+   only one configured, else :default."
+  [config opts]
+  (let [named (some-> (:tenant opts) str str/trim not-empty keyword)]
+    (tenants/resolve-id config named)))
+
+(defn- oauth-from [config id]
+  (:oauth (tenants/tenant-config config id)))
+
+(defn- client-id-key
+  "Config key a human would set for this tenant's OAuth client."
+  [config id]
+  (str/join "." (concat (map name (tenants/config-path config id)) ["oauth" "client-id"])))
 
 (defn- missing-client-id? [oauth]
   (str/blank? (:client-id oauth)))
 
-(defn- print-auth-url! [config]
-  (let [oauth (oauth-from config)
+(defn- print-auth-url! [config id]
+  (let [oauth (oauth-from config id)
         url   (oauth/authorization-url {:client-id    (:client-id oauth)
                                         :scopes       (scopes/union)
                                         :redirect-uri REDIRECT-URI
                                         :state        "isaac-google"})]
-    (println "Open this URL, then paste the code with `isaac google login --code <code>`:")
+    (println (str "Open this URL, then paste the code with `isaac google login "
+                  (when-not (= tenants/DEFAULT id) (str "--tenant " (name id) " "))
+                  "--code <code>`:"))
     (println url)
     0))
 
-(defn- exchange-and-store! [opts config code]
-  (let [oauth  (oauth-from config)
+(defn- exchange-and-store! [opts config id code]
+  (let [oauth  (oauth-from config id)
         tokens (oauth/exchange-code! (assoc oauth :redirect-uri REDIRECT-URI) code)]
     (cond
       (:error tokens)
@@ -72,7 +94,7 @@
 
       :else
       (do
-        (auth-store/save-tokens! (derive-root opts) PROVIDER tokens (feature-fs opts))
+        (auth-store/save-tokens! (derive-root opts) (tenants/auth-provider id) tokens (feature-fs opts))
         (println (str "Signed in as " (or (:account oauth) "the Google user")))
         (when (oauth/seven-day-token? (:expires_in tokens))
           (println "Google returned a 7-day refresh token — the consent screen is still in Testing."))
@@ -81,18 +103,20 @@
 (defn- run-login [opts code]
   (try
     (let [config (load-cfg opts)
-          oauth  (oauth-from config)]
+          id     (tenant-id config opts)
+          oauth  (oauth-from config id)]
       (cond
         (missing-client-id? oauth)
         (do (binding [*out* *err*]
-              (println "google.oauth.client-id is required. Set it in config (google.edn or isaac.edn)."))
+              (println (str (client-id-key config id)
+                            " is required. Set it in config (google.edn or isaac.edn).")))
             1)
 
         (str/blank? code)
-        (print-auth-url! config)
+        (print-auth-url! config id)
 
         :else
-        (exchange-and-store! opts config code)))
+        (exchange-and-store! opts config id code)))
     (catch clojure.lang.ExceptionInfo e
       (let [errors (:errors (ex-data e))
             msg    (or (some (fn [{:keys [key value]}]
@@ -141,13 +165,12 @@
                (registration/all))))
 
 
-(defn- run-status [opts]
-  (try
-    (let [root   (derive-root opts)
-          fs*    (feature-fs opts)
-          configured (nexus/-with-nested-nexus {:fs fs* :root root} (configured-keys))
-          state  (nexus/-with-nested-nexus {:fs fs* :root root}
-                   (health/load-state root))
+(defn- tenant-status-lines
+  "One organization's status, seen as that organization: its registrations
+   listed with its token, its keys from its own comms."
+  [root fs* state id]
+  (binding [tenants/*tenant* id]
+    (let [configured (nexus/-with-nested-nexus {:fs fs* :root root} (configured-keys))
           listed (try
                    (or (:subscriptions (events/list-subscriptions!)) [])
                    (catch Exception _ []))
@@ -163,12 +186,25 @@
                         own)
           keys   (vec (or (seq configured)
                           (sort (keys (or (:last-event-at state) {})))
-                          (sort (keys remote))))
-          lines  (health/status-lines {:keys   keys
-                                       :remote remote
-                                       :state  state})]
-      (doseq [line lines]
-        (println line))
+                          (sort (keys remote))))]
+      (health/status-lines {:keys   keys
+                            :remote remote
+                            :state  state}))))
+
+(defn- run-status [opts]
+  (try
+    (let [root    (derive-root opts)
+          fs*     (feature-fs opts)
+          config  (try (load-cfg opts) (catch Exception _ {}))
+          state   (nexus/-with-nested-nexus {:fs fs* :root root}
+                    (health/load-state root))
+          ids     (or (seq (tenants/ids config)) [tenants/DEFAULT])
+          several (> (count ids) 1)]
+      (doseq [id ids]
+        (when several
+          (println (str "tenant: " (name id))))
+        (doseq [line (tenant-status-lines root fs* state id)]
+          (println (if several (str "  " line) line))))
       0)
     (catch Exception e
       (binding [*out* *err*]
@@ -204,5 +240,5 @@
   option-spec)
 
 (defmethod cli-api/subcommands :google [_id]
-  [{:name "login"  :summary "Sign in as the Google user (authorization-code paste)"}
+  [{:name "login"  :summary "Sign in as the Google user (authorization-code paste; --tenant for one of several)"}
    {:name "status" :summary "Show Google registrations, expiries, last event, and door"}])

@@ -1,19 +1,25 @@
 (ns isaac.google.token
   "Public seam other modules call for a valid Google access token.
-   Refreshes when needed; never prompts."
+   Refreshes when needed; never prompts.
+
+   One token per tenant: each Google organization has its own OAuth client and
+   its own Google user, so a tenant's tokens are stored under its own provider
+   key and refreshed with its own credentials. A single-organization host keeps
+   the plain \"google\" key it always had (isaac-1zkz)."
   (:require
     [clojure.string :as str]
     [isaac.config.loader :as loader]
     [isaac.config.root :as root]
     [isaac.fs :as fs]
     [isaac.google.oauth :as oauth]
+    [isaac.google.tenants :as tenants]
     [isaac.llm.auth.store :as auth-store]
     [isaac.nexus :as nexus]))
 
 (def PROVIDER "google")
 
-(defn- oauth-creds [config]
-  (get-in config [:google :oauth]))
+(defn- oauth-creds [config id]
+  (:oauth (tenants/tenant-config config id)))
 
 (defn- auth-root []
   (or (nexus/get :root) (root/current-root)))
@@ -21,16 +27,29 @@
 (defn- feature-fs []
   (or (fs/instance) (fs/real-fs)))
 
+(defn- configured? [snapshot]
+  (some (fn [[_ tenant]] (get-in tenant [:oauth :client-id]))
+        (tenants/tenants snapshot)))
+
 (defn- load-config []
   (let [snap (loader/snapshot "google token")]
-    (if (get-in snap [:google :oauth :client-id])
+    (if (configured? snap)
       snap
       (or (:config (loader/load-config-result {:root (auth-root) :fs (feature-fs)}))
           snap
           {}))))
 
-(defn- refresh-via-http! [auth-dir fs* tokens config]
-  (let [response (oauth/refresh! (oauth-creds config) (:refresh tokens))]
+(defn- login-message
+  "`isaac google login` for one organization; the tenant is named when there
+   are several, so the message says which login is missing."
+  [id]
+  (if (or (nil? id) (= tenants/DEFAULT id))
+    "Missing Google login. Run `isaac google login` first."
+    (str "Missing Google login for tenant " (name id)
+         ". Run `isaac google login --tenant " (name id) "` first.")))
+
+(defn- refresh-via-http! [auth-dir fs* provider tokens creds]
+  (let [response (oauth/refresh! creds (:refresh tokens))]
     (cond
       (or (= "invalid_grant" (:error response))
           (= "invalid_grant" (get-in response [:body :error])))
@@ -44,44 +63,49 @@
 
       :else
       (do
-        (auth-store/save-tokens! auth-dir PROVIDER
+        (auth-store/save-tokens! auth-dir provider
                                  (cond-> response
                                    (not (:refresh_token response))
                                    (assoc :refresh_token (:refresh tokens)))
                                  fs*)
-        {:tokens (auth-store/load-tokens auth-dir PROVIDER fs*)}))))
+        {:tokens (auth-store/load-tokens auth-dir provider fs*)}))))
 
 (defn resolve-tokens
-  "Returns the stored token map (with :access) after refreshing if needed,
-   or an error map {:error :auth-failed :message ...}."
+  "Returns `id`'s stored token map (with :access) after refreshing if needed,
+   or an error map {:error :auth-failed :message ...}. With no tenant named,
+   acts as the tenant bound to this thread, else the only one configured."
   ([]
    (resolve-tokens (load-config)))
   ([config]
-   (let [auth-dir (auth-root)
+   (resolve-tokens config nil))
+  ([config id]
+   (let [id       (tenants/resolve-id config id)
+         provider (tenants/auth-provider id)
+         auth-dir (auth-root)
          fs*      (feature-fs)
-         tokens   (auth-store/load-tokens auth-dir PROVIDER fs*)]
+         tokens   (auth-store/load-tokens auth-dir provider fs*)]
      (cond
        (nil? tokens)
-       {:error   :auth-failed
-        :message "Missing Google login. Run `isaac google login` first."}
+       {:error :auth-failed :message (login-message id)}
 
        (not (auth-store/token-needs-refresh? tokens))
        tokens
 
        (str/blank? (:refresh tokens))
-       {:error   :auth-failed
-        :message "Missing Google login. Run `isaac google login` first."}
+       {:error :auth-failed :message (login-message id)}
 
        :else
-       (let [result (refresh-via-http! auth-dir fs* tokens config)]
+       (let [result (refresh-via-http! auth-dir fs* provider tokens (oauth-creds config id))]
          (or (:tokens result) result))))))
 
 (defn token
-  "Valid Google access token string, refreshing when needed. Never prompts.
-   Throws on auth failure so callers cannot silently proceed without a token."
-  []
-  (let [result (resolve-tokens)]
-    (if (:error result)
-      (throw (ex-info (or (:message result) "Google authentication failed")
-                      result))
-      (:access result))))
+  "Valid Google access token string for a tenant, refreshing when needed.
+   Never prompts. Throws on auth failure so callers cannot silently proceed
+   without a token."
+  ([] (token nil))
+  ([id]
+   (let [result (resolve-tokens (load-config) id)]
+     (if (:error result)
+       (throw (ex-info (or (:message result) "Google authentication failed")
+                       result))
+       (:access result)))))

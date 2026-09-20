@@ -1,6 +1,9 @@
 (ns isaac.google.component-spec
   (:require
+    [isaac.component.protocol :as component]
+    [isaac.config.loader :as loader]
     [isaac.google.component :as sut]
+    [isaac.google.door :as door]
     [isaac.nexus :as nexus]
     [isaac.scheduler.runtime :as scheduler]
     [speclj.core :refer :all]))
@@ -17,4 +20,44 @@
       (sut/stop! handle)
       (should= #{} (set (map :id (scheduler/list-tasks sched))))
       (scheduler/shutdown! sched)))
+
+  ;; One door, one trust rule per organization. The manifest can only declare
+  ;; the flat rule (its config refs are static paths), so a tenanted host gets
+  ;; its rules registered at boot (isaac-1zkz).
+  (context "the door's trust rules (isaac-1zkz)"
+
+    (it "registers one rule per tenant at start"
+      (let [registered (atom [])
+            sched      (scheduler/create {})]
+        (nexus/-with-nexus {:scheduler sched}
+          (sut/start! {:config            {:google {:tonotop {:project "marigold"}
+                                                    :acme    {:project "acme-prod"}}}
+                       :register-identity! (fn [entry] (swap! registered conj (first entry)))}))
+        (should= [:google-pubsub/acme :google-pubsub/tonotop] (sort @registered))
+        (scheduler/shutdown! sched)))
+
+    (it "registers a flat host's single rule, named as it always was"
+      (let [registered (atom [])
+            sched      (scheduler/create {})]
+        (nexus/-with-nexus {:scheduler sched}
+          (sut/start! {:config             {:google {:project "marigold"}}
+                       :register-identity! (fn [entry] (swap! registered conj (first entry)))}))
+        (should= [:google-pubsub] @registered)
+        (scheduler/shutdown! sched)))
+
+    ;; A host that starts no background services still answers pushes, so the
+    ;; door's identity cannot ride on the scheduler.
+    (it "registers the door at start even when background services are off"
+      (let [registered (atom [])]
+        (loader/set-snapshot! {:google {:acme {:project "acme-prod"}}} "component spec")
+        (with-redefs [door/registrar (fn [] (fn [entry] (swap! registered conj (first entry))))]
+          (component/start (sut/->RegistrationTimer {:start-background-services? false} (atom nil))))
+        (should= [:google-pubsub/acme] @registered)))
+
+    (it "takes the live config when no config is named"
+      (let [registered (atom [])]
+        (loader/set-snapshot! {:google {:project "marigold"}} "component spec")
+        (with-redefs [door/registrar (fn [] (fn [entry] (swap! registered conj (first entry))))]
+          (sut/register-door! nil nil))
+        (should= [:google-pubsub] @registered))))
   )

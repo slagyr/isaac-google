@@ -2,6 +2,7 @@
   (:require
     [clojure.edn :as edn]
     [isaac.module.protocol]
+    [isaac.google.config :as config]
     [isaac.google.module :as sut]
     [isaac.google.people :as people]
     [speclj.core :refer [describe it should should=]]))
@@ -22,6 +23,9 @@
 
   (it "declares the google config table"
     (should= :map (get-in manifest [:isaac.config/schema :google :schema :type])))
+
+  (it "declares the google table flat-or-tenanted, exactly as the namespace defines it (isaac-1zkz)"
+    (should= config/google-schema (get-in manifest [:isaac.config/schema :google :schema])))
 
   (it "declares the scopes berth and contributes openid plus the directory scope"
     (should= :seq (get-in manifest [:berths :isaac.google/scopes :schema :type]))

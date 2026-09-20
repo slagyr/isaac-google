@@ -7,12 +7,14 @@
     [isaac.foundation.cli-steps :as fcli]
     [isaac.fs :as fs]
     [cheshire.core :as json]
+    [isaac.google.component :as google-component]
     [isaac.google.events :as google-events]
     [isaac.google.handler :as google-handler]
     [isaac.google.health :as google-health]
     [isaac.google.inbox :as google-inbox]
     [isaac.google.people :as google-people]
     [isaac.google.registration :as google-registration]
+    [isaac.google.tenants :as tenants]
     [isaac.google.token :as google-token]
     [isaac.google.worker :as google-worker]
     [isaac.http.oidc :as oidc]
@@ -128,6 +130,25 @@
                                     :expires_in    3600}
                                    (feature-fs)))))))
 
+(defn google-auth-store-for-tenant-has-access-and-refresh
+  "Then: assert one organization's stored tokens. Given: seed them when the
+   store is empty (isaac-1zkz)."
+  [tenant at rt]
+  (with-feature-fs
+    (fn []
+      (let [provider (tenants/auth-provider (keyword tenant))
+            tokens   (auth-store/load-tokens (feature-root) provider (feature-fs))]
+        (if (or tokens (g/get :google-token-stub))
+          (do
+            (g/should tokens)
+            (g/should= at (:access tokens))
+            (g/should= rt (:refresh tokens)))
+          (auth-store/save-tokens! (feature-root) provider
+                                   {:access_token  at
+                                    :refresh_token rt
+                                    :expires_in    3600}
+                                   (feature-fs)))))))
+
 (defn google-auth-store-has-expired-access [rt]
   (with-feature-fs
     (fn []
@@ -194,6 +215,9 @@
 
 (defthen "the error mentions {text:string}"
   isaac.google-steps/error-mentions)
+
+(defthen #"the google auth store for tenant \"([^\"]+)\" has access \"([^\"]+)\" and refresh \"([^\"]+)\""
+  isaac.google-steps/google-auth-store-for-tenant-has-access-and-refresh)
 
 (def ^:private received* (atom {}))
 (def ^:private throwers* (atom #{}))
@@ -308,6 +332,39 @@
      (str "Authorization: Bearer " token "; X-Forwarded-For: " GOOGLE-PUSH-IP)
      body)))
 
+(defn- server-config
+  "The config the running feature server serves — what isaac-http resolves a
+   trust rule's config refs against."
+  []
+  (or (when-let [cfg-fn (:cfg-fn (g/get :server-handler-opts))] (cfg-fn))
+      (g/get :server-config)
+      {}))
+
+(defn google-runtime-component-starts
+  "What isaac.runner does at boot and a feature server does not: start this
+   module's runtime component, whose first act is registering one push-door
+   trust rule per configured organization. Components belong to the runner
+   alone (isaac.component.runtime: \"Only isaac.runner invokes start-all!\"),
+   so a scenario that needs a tenanted door says so (isaac-1zkz)."
+  []
+  (nexus/-with-nested-nexus {:fs (feature-fs) :root (feature-root)}
+    (google-component/register-door! (server-config) nil)))
+
+(defn google-pushes-signed-on
+  "A push as one organization's Pub/Sub sends it: signed by that project's
+   push service account and delivered on that project's subscription. Naming
+   both is what lets a scenario cross them (isaac-1zkz)."
+  [id ce-type email subscription data]
+  (let [claims (merge (default-claims) {:email email} @next-claims*)
+        token  (mint-token claims)
+        _      (reset! next-claims* nil)
+        body   (json/generate-string
+                 (assoc (push-envelope id ce-type data) :subscription subscription))]
+    ((requiring-resolve 'isaac.http.server-steps/post-request-with-header-and-body)
+     "/google/pubsub"
+     (str "Authorization: Bearer " token "; X-Forwarded-For: " GOOGLE-PUSH-IP)
+     body)))
+
 (defn google-pushes-gmail [id data]
   (google-pushes id nil data))
 
@@ -397,6 +454,12 @@
 
 (defwhen #"Google pushes message \"([^\"]+)\" of type \"([^\"]+)\" with data:"
   isaac.google-steps/google-pushes)
+
+(defgiven "the Google runtime component is started"
+  isaac.google-steps/google-runtime-component-starts)
+
+(defwhen #"Google pushes message \"([^\"]+)\" of type \"([^\"]+)\" signed by \"([^\"]+)\" on \"([^\"]+)\" with data:"
+  isaac.google-steps/google-pushes-signed-on)
 
 (defwhen #"Google pushes a Gmail watch message \"([^\"]+)\" with data:"
   isaac.google-steps/google-pushes-gmail)

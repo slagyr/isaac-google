@@ -4,6 +4,7 @@
     [isaac.google.events]
     [isaac.google.health]
     [isaac.google.registration :as sut]
+    [isaac.google.tenants :as tenants]
     [isaac.nexus :as nexus]
     [speclj.core :refer :all])
   (:import (java.time Instant)))
@@ -115,5 +116,49 @@
       (sut/tick! {:now now :root root :door-up? true})
       (should= [[:stop "yopp@tonotop.com"]] @@calls)
       (should= {} (sut/load-state root)))
+    )
+  
+
+  (context "several Google organizations"
+
+    (with calls (atom []))
+    (with cfg {:google {:tonotop {:project "p-tonotop" :renew-within-hours 24}
+                        :acme    {:project "p-acme" :renew-within-hours 1}}})
+    (with entry (let [calls @calls]
+                  {:create! (fn [k]
+                              (swap! calls conj [:create tenants/*tenant* k])
+                              {:name k :expireTime "2026-09-25T12:00:00Z"})
+                   :renew!  (fn [n]
+                              (swap! calls conj [:renew tenants/*tenant* n])
+                              {:name n :expireTime "2026-09-25T12:00:00Z"})
+                   :key     (fn [] [(str "spaces/" (name (or tenants/*tenant* :none)))])
+                   :delete! (fn [n] (swap! calls conj [:stop tenants/*tenant* n]))
+                   :remote  (fn []
+                              (select-keys (sut/load-state root)
+                                           [(str "spaces/" (name (or tenants/*tenant* :none)))]))}))
+
+    (around [example]
+      (sut/reset-registrations!)
+      (nexus/-with-nexus {:root root :fs (fs/mem-fs)}
+        (with-redefs [isaac.google.events/list-subscriptions! (fn [] {:subscriptions []})
+                      isaac.google.health/apply! (fn [_] nil)]
+          (example)))
+      (sut/reset-registrations!))
+
+    (it "reconciles once per tenant, acting as that organization"
+      (sut/register! [:chat @entry])
+      (sut/tick! {:now now :root root :config @cfg :door-up? true})
+      (should= [[:create :acme "spaces/acme"]
+                [:create :tonotop "spaces/tonotop"]]
+               @@calls))
+
+    (it "renews inside each tenant's own window"
+      (sut/register! [:chat @entry])
+      (sut/save-state! root {"spaces/acme"    {:name "subscriptions/s-acme"
+                                               :expires-at "2026-09-19T06:00:00Z"}
+                             "spaces/tonotop" {:name "subscriptions/s-tonotop"
+                                               :expires-at "2026-09-19T06:00:00Z"}})
+      (sut/tick! {:now now :root root :config @cfg :door-up? true})
+      (should= [[:renew :tonotop "subscriptions/s-tonotop"]] @@calls))
     )
   )

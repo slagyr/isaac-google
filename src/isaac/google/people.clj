@@ -9,6 +9,7 @@
   (:require
     [clojure.string :as str]
     [isaac.google.events :as events]
+    [isaac.google.tenants :as tenants]
     [isaac.logger :as log]))
 
 (def BASE "https://people.googleapis.com/v1")
@@ -70,15 +71,24 @@
     (or (= 403 (:status response))
         (str/includes? (str/lower-case message) "insufficient authentication scopes"))))
 
+(defn- sighting-tenant
+  "The organization this lookup is being made as. Google ids are global, but
+   the directory answer is one organization's, asked with its token, so a
+   sighting records which (isaac-1zkz)."
+  []
+  tenants/*tenant*)
+
 (defn- entry-from [user display-name body]
-  {:user         (str user)
+  {:tenant       (sighting-tenant)
+   :user         (str user)
    :display-name (or (primary-of (:names body) :displayName)
                      (not-empty (str (or display-name "")))
                      nil)
    :email        (primary-of (:emailAddresses body) :value)})
 
 (defn- fallback-entry [user display-name]
-  {:user         (str user)
+  {:tenant       (sighting-tenant)
+   :user         (str user)
    :display-name (not-empty (str (or display-name "")))
    :email        nil})
 
@@ -119,14 +129,15 @@
   ([user] (resolve user {}))
   ([user {:keys [display-name]}]
    (when (seq (str (or user "")))
-     (let [cached (get @memo* (str user))]
+     (let [memo-key [(sighting-tenant) (str user)]
+           cached   (get @memo* memo-key)]
        (if (fresh? cached)
          (let [entry (:entry cached)]
            (cond-> entry
              (and (nil? (:display-name entry)) (seq (str (or display-name ""))))
              (assoc :display-name display-name)))
          (let [entry (lookup user display-name)]
-           (swap! memo* assoc (str user) {:at (now-ms) :entry entry})
+           (swap! memo* assoc memo-key {:at (now-ms) :entry entry})
            entry))))))
 
 (defn render

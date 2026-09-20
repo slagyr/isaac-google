@@ -1,6 +1,7 @@
 (ns isaac.google.people-spec
   (:require
     [isaac.google.people :as sut]
+    [isaac.google.tenants :as tenants]
     [speclj.core :refer :all]))
 
 (def micah
@@ -64,6 +65,24 @@
         (should= 1 (count @warns))
         (should= :google.people/scope-missing (ffirst @warns))
         (should-contain sut/DIRECTORY-SCOPE (pr-str (first @warns))))))
+
+  ;; Google ids are global, but the directory answer is not: each organization
+  ;; sees its own people with its own token, so one org's answer must never be
+  ;; served to another (isaac-1zkz).
+  (context "several organizations"
+
+    (it "records the organization the sighting came from"
+      (let [[entry _] (binding [tenants/*tenant* :acme]
+                        (with-fetch micah #(sut/resolve "users/1234")))]
+        (should= :acme (:tenant entry))))
+
+    (it "asks each organization for itself rather than reusing the other's answer"
+      (let [calls (atom [])]
+        (with-redefs [sut/fetch! (fn [user] (swap! calls conj [tenants/*tenant* user]) micah)]
+          (binding [tenants/*tenant* :tonotop] (sut/resolve "users/1234"))
+          (binding [tenants/*tenant* :acme] (sut/resolve "users/1234"))
+          (binding [tenants/*tenant* :acme] (sut/resolve "users/1234")))
+        (should= [[:tonotop "users/1234"] [:acme "users/1234"]] @calls))))
 
   (context "render"
 

@@ -2,12 +2,23 @@
   (:require
     [isaac.fs :as fs]
     [isaac.google.oauth :as oauth]
+    [isaac.google.tenants :as tenants]
     [isaac.google.token :as sut]
     [isaac.llm.auth.store :as auth-store]
     [isaac.nexus :as nexus]
-    [speclj.core :refer [around context describe it should= should-contain should-throw with]]))
+    [speclj.core :refer [around context describe it should= should-be-nil should-contain should-throw with]]))
 
 (def root "/test/google-token")
+
+(def flat-config
+  {:google {:project "marigold"
+            :oauth   {:client-id "cid" :client-secret "shh" :account "yopp@tonotop.com"}}})
+
+(def two-tenant-config
+  {:google {:tonotop {:project "marigold"
+                      :oauth   {:client-id "cid-t" :client-secret "shh"}}
+            :acme    {:project "acme-prod"
+                      :oauth   {:client-id "cid-a" :client-secret "shh"}}}})
 
 (describe "isaac.google.token"
 
@@ -62,5 +73,52 @@
                                @mem)
       (with-redefs [oauth/refresh! (fn [_ _] {:error "invalid_grant"})]
         (should-throw clojure.lang.ExceptionInfo (sut/token))))
+    )
+
+  (context "one token per tenant (isaac-1zkz)"
+
+    (it "a flat config's login is the tenant's login"
+      (auth-store/save-tokens! root "google"
+                               {:access_token "at-flat" :refresh_token "rt-1" :expires_in 3600}
+                               @mem)
+      (should= "at-flat" (:access (sut/resolve-tokens flat-config :default)))
+      (should= "at-flat" (sut/token :default)))
+
+    (it "each tenant has its own token"
+      (auth-store/save-tokens! root "google/tonotop"
+                               {:access_token "at-tonotop" :refresh_token "rt-t" :expires_in 3600}
+                               @mem)
+      (auth-store/save-tokens! root "google/acme"
+                               {:access_token "at-acme" :refresh_token "rt-a" :expires_in 3600}
+                               @mem)
+      (should= "at-tonotop" (:access (sut/resolve-tokens two-tenant-config :tonotop)))
+      (should= "at-acme" (:access (sut/resolve-tokens two-tenant-config :acme))))
+
+    (it "a tenant with no login of its own does not borrow another's"
+      (auth-store/save-tokens! root "google/tonotop"
+                               {:access_token "at-tonotop" :refresh_token "rt-t" :expires_in 3600}
+                               @mem)
+      (let [result (sut/resolve-tokens two-tenant-config :acme)]
+        (should= :auth-failed (:error result))
+        (should-contain "acme" (:message result))))
+
+    (it "refreshes with the tenant's own oauth client and stores it back there"
+      (auth-store/save-tokens! root "google/acme"
+                               {:access_token "at-old" :refresh_token "rt-a" :expires_in -1}
+                               @mem)
+      (with-redefs [oauth/refresh! (fn [creds refresh]
+                                     (should= "cid-a" (:client-id creds))
+                                     (should= "rt-a" refresh)
+                                     {:access_token "at-new" :expires_in 3600})]
+        (should= "at-new" (:access (sut/resolve-tokens two-tenant-config :acme))))
+      (should= "at-new" (:access (auth-store/load-tokens root "google/acme" @mem)))
+      (should-be-nil (auth-store/load-tokens root "google" @mem)))
+
+    (it "acts as the tenant bound to the thread"
+      (auth-store/save-tokens! root "google/acme"
+                               {:access_token "at-acme" :refresh_token "rt-a" :expires_in 3600}
+                               @mem)
+      (binding [tenants/*tenant* :acme]
+        (should= "at-acme" (:access (sut/resolve-tokens two-tenant-config)))))
     )
   )

@@ -1,5 +1,11 @@
 (ns isaac.google.registration
-  "Berth :isaac.google/registration and the reconcile timer."
+  "Berth :isaac.google/registration and the reconcile timer.
+
+   A reconcile pass is per organization: subscriptions live in a tenant's own
+   GCP project, are created with that tenant's token, and expire on that
+   tenant's window. So one tick surveys and reconciles each configured tenant
+   in turn with `tenants/*tenant*` bound; a single-organization host has one
+   tenant (`:default`) and behaves exactly as before (isaac-1zkz)."
   (:require
     [clojure.edn :as edn]
     [clojure.pprint :as pprint]
@@ -9,6 +15,7 @@
     [isaac.fs :as fs]
     [isaac.google.events :as events]
     [isaac.google.health :as health]
+    [isaac.google.tenants :as tenants]
     [isaac.logger :as log]
     [isaac.module.berths :as berths]
     [isaac.module.discovery :as discovery]
@@ -121,7 +128,7 @@
 (defn- load-cfg []
   (let [root (feature-root)
         snap (loader/snapshot "google registration")
-        cfg  (if (get-in snap [:google :topic])
+        cfg  (if (some (comp :topic val) (tenants/tenants snap))
                snap
                (or (when root
                      (:config (loader/load-config-result {:root root :fs (runtime-fs)})))
@@ -129,8 +136,11 @@
                    {}))]
     cfg))
 
-(defn- renew-hours [cfg]
-  (let [v (get-in cfg [:google :renew-within-hours])]
+(defn- renew-hours
+  "How close to expiry this tenant renews. Each organization sets its own;
+   a flat config's value is the default tenant's."
+  [cfg id]
+  (let [v (:renew-within-hours (tenants/tenant-config cfg id))]
     (cond
       (int? v) v
       (number? v) (long v)
@@ -228,30 +238,70 @@
           (some? ((requiring-resolve 'isaac.component.registry/instance-for) :google-registration)))
       (catch Exception _ false))))
 
+(defn- list-subscriptions []
+  (try
+    (or (:subscriptions (events/list-subscriptions!)) [])
+    (catch Exception _ [])))
+
+(defn- remote-for [entry listed]
+  (if-let [remote (:remote entry)]
+    (or (remote) {})
+    (remote-index (or listed []) (:expiry entry))))
+
+(defn- survey-tenant
+  "What one organization has and what it needs, without changing anything.
+   Listing and every :key / :remote hook run as that tenant, so they reach
+   its Google project with its token."
+  [now cfg entries id]
+  (binding [tenants/*tenant* id]
+    (let [hours  (renew-hours cfg id)
+          listed (list-subscriptions)
+          plans  (mapv (fn [[_ entry]]
+                         (let [configured (call-keys entry)
+                               remote     (remote-for entry listed)]
+                           {:entry   entry
+                            :keys    configured
+                            :remote  remote
+                            :actions (plan {:configured         configured
+                                            :remote             remote
+                                            :now                now
+                                            :renew-within-hours hours})}))
+                       entries)]
+      {:tenant id
+       :keys   (vec (mapcat :keys plans))
+       :remote (if (seq plans)
+                 (apply merge (map :remote plans))
+                 (remote-index listed nil))
+       :plans  plans})))
+
+(defn- execute-tenant! [root {:keys [tenant plans]}]
+  (binding [tenants/*tenant* tenant]
+    (doseq [{:keys [entry actions]} plans
+            action                  actions]
+      (try
+        (execute! root entry action)
+        (catch Exception e
+          (log/error :google/registration-failed
+                     :key (:key action)
+                     :reason (.getMessage e)))))))
+
 (defn tick!
-  "One reconcile pass on the caller thread. Also evaluates health."
+  "One reconcile pass on the caller thread, per configured tenant. Also
+   evaluates health, once, over every tenant's keys and remote state."
   ([] (tick! {}))
-  ([{:keys [now root] :as opts}]
+  ([{:keys [now root config] :as opts}]
    ;; :door-up? is read from opts explicitly — a destructured local of the
    ;; same name would shadow the door-up? fn, and the scheduler calls (tick! {}).
    (let [up?     (if (contains? opts :door-up?) (:door-up? opts) (door-up?))
          root    (or root (feature-root))
          now     (or now (memory/now) (Instant/now))
          _       (ensure-contributions!)
-         cfg     (load-cfg)
-         hours   (renew-hours cfg)
-         listed  (try
-                   (or (:subscriptions (events/list-subscriptions!)) [])
-                   (catch Exception _ []))
+         cfg     (or config (load-cfg))
          entries (all)
-         remote-for (fn [entry]
-                      (if-let [remote (:remote entry)]
-                        (or (remote) {})
-                        (remote-index (or listed []) (:expiry entry))))
-         remotes (if (seq entries)
-                   (apply merge (for [[_ entry] entries] (remote-for entry)))
-                   (remote-index (or listed []) nil))
-         keys    (vec (or (seq (mapcat (fn [[_ entry]] (call-keys entry)) entries))
+         ids     (or (seq (tenants/ids cfg)) [tenants/DEFAULT])
+         surveys (mapv #(survey-tenant now cfg entries %) ids)
+         remotes (apply merge {} (map :remote surveys))
+         keys    (vec (or (seq (mapcat :keys surveys))
                           (sort (keys (or (:last-event-at (health/load-state root)) {})))))
          h-state (health/load-state root)
          conditions (health/evaluate {:now      now
@@ -261,20 +311,8 @@
                                       :remote   remotes
                                       :door-up? up?})]
      (health/log-conditions! conditions)
-     (doseq [[_ entry] entries]
-       (let [configured (call-keys entry)
-             remote     (remote-for entry)
-             actions    (plan {:configured         configured
-                               :remote             remote
-                               :now                now
-                               :renew-within-hours hours})]
-         (doseq [action actions]
-           (try
-             (execute! root entry action)
-             (catch Exception e
-               (log/error :google/registration-failed
-                          :key (:key action)
-                          :reason (.getMessage e)))))))
+     (doseq [survey surveys]
+       (execute-tenant! root survey))
      (health/apply! {:now        now
                      :config     cfg
                      :root       root
