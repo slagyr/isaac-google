@@ -3,6 +3,7 @@
     [clojure.edn :as edn]
     [isaac.module.protocol]
     [isaac.google.module :as sut]
+    [isaac.google.people :as people]
     [speclj.core :refer [describe it should should=]]))
 
 (def manifest
@@ -22,9 +23,9 @@
   (it "declares the google config table"
     (should= :map (get-in manifest [:isaac.config/schema :google :schema :type])))
 
-  (it "declares the scopes berth and contributes openid"
+  (it "declares the scopes berth and contributes openid plus the directory scope"
     (should= :seq (get-in manifest [:berths :isaac.google/scopes :schema :type]))
-    (should= ["openid"] (:isaac.google/scopes manifest)))
+    (should= ["openid" people/DIRECTORY-SCOPE] (:isaac.google/scopes manifest)))
 
   (it "declares the registration berth"
     (should= :map (get-in manifest [:berths :isaac.google/registration :schema :type]))

@@ -11,11 +11,13 @@
     [isaac.google.handler :as google-handler]
     [isaac.google.health :as google-health]
     [isaac.google.inbox :as google-inbox]
+    [isaac.google.people :as google-people]
     [isaac.google.registration :as google-registration]
     [isaac.google.token :as google-token]
     [isaac.google.worker :as google-worker]
     [isaac.http.oidc :as oidc]
     [isaac.http.oidc-fixture :as oidc-fixture]
+    [isaac.logger :as log]
     [isaac.tool.memory :as memory]
     [isaac.llm.auth.store :as auth-store]
     [isaac.llm.http :as llm-http]
@@ -31,10 +33,21 @@
 
 (def ^:private events-state* (atom default-events-state))
 
+(def ^:private default-people-state {:known {} :error nil})
+
+(def ^:private people-state* (atom default-people-state))
+
+(def ^:private original-events-request* (atom nil))
+
+(declare restore-people-stub!)
+
 (g/after-scenario
   (fn []
     (alter-var-root #'discovery/*foundation-index-override* (constantly nil))
     (reset! events-state* default-events-state)
+    (reset! people-state* default-people-state)
+    (restore-people-stub!)
+    (google-people/reset-memo!)
     (google-registration/reset-registrations!)))
 
 (defn- feature-fs []
@@ -576,3 +589,113 @@
 
 (defthen #"(\d+) outbound HTTP requests to \"([^\"]+)\" for \"([^\"]+)\" were made"
   isaac.google-steps/outbound-http-count-for-space)
+
+;; region ----- People API (who spoke) -----
+
+(defn- person-key [user]
+  (last (str/split (str user) #"/")))
+
+(defn- people-url? [url]
+  (str/includes? (str url) "people.googleapis.com"))
+
+(defn- stub-people-request! [{:keys [url query] :as request}]
+  (if-not (people-url? url)
+    ;; anything else still belongs to whoever owned the seam before us
+    ((or @original-events-request* (constantly {})) request)
+    (do
+      (g/update! :people-requests
+                 (fn [prior] (vec (conj (or prior []) {:url (str url) :query query}))))
+      (let [state @people-state*]
+        (or (:error state)
+            (get (:known state) (person-key url))
+            {})))))
+
+(defn- install-people-stub!
+  "Own isaac.google.events/request! for the scenario so any module's code path
+   (gchat's inbound handler, say) sees the stubbed People API, not just steps
+   that wrap it themselves."
+  []
+  (when-not @original-events-request*
+    (reset! original-events-request* google-events/request!)
+    (alter-var-root #'google-events/request! (constantly stub-people-request!))))
+
+(defn restore-people-stub! []
+  (when-let [original @original-events-request*]
+    (alter-var-root #'google-events/request! (constantly original))
+    (reset! original-events-request* nil)))
+
+(defn people-api-knows [user display-name email]
+  (install-people-stub!)
+  (swap! people-state* assoc-in [:known (person-key user)]
+         {:names          [{:displayName display-name :metadata {:primary true}}]
+          :emailAddresses [{:value email :metadata {:primary true}}]}))
+
+(defn people-api-refuses [status message]
+  (install-people-stub!)
+  (swap! people-state* assoc :error
+         {:error   :api-error
+          :status  (if (string? status) (parse-long status) status)
+          :message message}))
+
+(defn- resolve-person! [user display-name]
+  (let [entry (atom nil)]
+    (log/capture-logs
+      (with-redefs [google-events/request! stub-people-request!]
+        (reset! entry (google-people/resolve user (cond-> {}
+                                                    (seq (str (or display-name "")))
+                                                    (assoc :display-name display-name))))))
+    (g/assoc! :person @entry)
+    (g/update! :people-warnings
+               (fn [prior]
+                 (vec (concat (or prior [])
+                              (filterv #(= :warn (:level %)) @log/captured-logs)))))))
+
+(defn person-is-resolved [user]
+  (resolve-person! user nil))
+
+(defn person-is-resolved-with-display-name [user display-name]
+  (resolve-person! user display-name))
+
+(defn person-renders-as [expected]
+  (g/should= expected (google-people/render (g/get :person))))
+
+(defn person-has-no-email []
+  (g/should= nil (:email (g/get :person))))
+
+(defn people-api-asked [n user fields]
+  (let [n     (if (string? n) (parse-long n) n)
+        hits  (filter (fn [{:keys [url query]}]
+                        (and (str/ends-with? url (str "/people/" (person-key user)))
+                             (= fields (:personFields query))))
+                      (or (g/get :people-requests) []))]
+    (g/should= n (count hits))))
+
+(defn one-scope-warning [scope]
+  (let [warns (filter #(= :google.people/scope-missing (:event %))
+                      (or (g/get :people-warnings) []))]
+    (g/should= 1 (count warns))
+    (g/should= scope (:scope (first warns)))))
+
+(defgiven #"the Google People API knows \"([^\"]+)\" as \"([^\"]+)\" with email \"([^\"]+)\""
+  isaac.google-steps/people-api-knows)
+
+(defgiven #"the Google People API refuses with (\d+) \"([^\"]+)\""
+  isaac.google-steps/people-api-refuses)
+
+(defwhen #"the person \"([^\"]+)\" is resolved with display name \"([^\"]+)\""
+  isaac.google-steps/person-is-resolved-with-display-name)
+
+(defwhen #"the person \"([^\"]+)\" is resolved$"
+  isaac.google-steps/person-is-resolved)
+
+(defthen #"the person renders as \"([^\"]+)\""
+  isaac.google-steps/person-renders-as)
+
+(defthen "the person has no email"
+  isaac.google-steps/person-has-no-email)
+
+(defthen #"the People API was asked (\d+) times? for \"([^\"]+)\" with fields \"([^\"]+)\""
+  isaac.google-steps/people-api-asked)
+
+(defthen #"exactly one warning named the missing \"([^\"]+)\" scope"
+  isaac.google-steps/one-scope-warning)
