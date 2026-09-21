@@ -177,4 +177,19 @@
       (should= [:gchat-acme] (mapv key (sut/comms-for tenanted-comms :gchat :acme)))
       (should= [:gchat] (mapv key (sut/comms-for tenanted-comms :gchat :tonotop)))
       (should= [] (sut/comms-for tenanted-comms :gmail :acme))))
-  )
+  
+  (context "the key a comm names its organization with (isaac-1zkz follow-up)"
+
+    (it "reads the comm kind's own namespaced key"
+      (let [cfg {:google {:tonotop {:project "p1"} :acme {:project "p2"}}}]
+        (should= :acme (sut/of-comm cfg {:gchat/google "acme"}))
+        (should= :tonotop (sut/of-comm cfg {:gmail/google "tonotop"}))))
+
+    (it "still reads a bare :google, for configs written before the rename"
+      (let [cfg {:google {:tonotop {:project "p1"} :acme {:project "p2"}}}]
+        (should= :acme (sut/of-comm cfg {:google "acme"}))))
+
+    (it "falls back to the only organization when a comm names none"
+      (should= :default (sut/of-comm {:google {:project "p"}} {})))
+    )
+)

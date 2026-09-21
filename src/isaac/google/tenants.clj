@@ -137,10 +137,15 @@
                         (:comms config)))))
 
 (defn of-comm
-  "Which organization a comm speaks for: the one its slice names with
-   `:google`, else the only one configured, else the default tenant."
+  "Which organization a comm speaks for: the one its slice names, else the
+   only one configured, else the default tenant.
+
+   The key is namespaced per comm kind — :gchat/google, :gmail/google — like
+   every other key a comm contributes. A bare :google collides in the composed
+   comm schema the moment two Google comms are installed on one host, which is
+   every host that runs Chat and Gmail together (isaac-1zkz follow-up)."
   [config slice]
-  (if-let [named (:google slice)]
+  (if-let [named (some slice [:gchat/google :gmail/google :google])]
     (keyword named)
     (let [configured (ids config)]
       (if (= 1 (count configured))
