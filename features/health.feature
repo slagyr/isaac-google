@@ -9,8 +9,8 @@ Feature: Google health and attention
     Given default Grover setup in "/test/google-health"
     And config:
       | log.output                               | memory                         |
-      | google.topic                             | projects/marigold/topics/isaac |
-      | google.health.silent-after-hours         | 6                              |
+      | google.tonotop.topic                             | projects/marigold/topics/isaac |
+      | google.tonotop.health.silent-after-hours         | 6                              |
       | attention.notify.comm                    | discord                        |
       | attention.notify.target                  | boiler-room                    |
       | comms.gchat.gchat/account                | yopp@tonotop.com               |

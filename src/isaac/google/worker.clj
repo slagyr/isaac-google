@@ -21,7 +21,7 @@
      (doseq [event (inbox/pending root)]
        (let [message-id (:message-id event)
              type       (:type event)
-             tenant     (or (:tenant event) tenants/DEFAULT)
+             tenant     (:tenant event)
              f          (handler/lookup type)]
          (cond
            (nil? f)

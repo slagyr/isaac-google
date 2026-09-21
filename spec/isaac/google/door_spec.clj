@@ -3,10 +3,10 @@
     [isaac.google.door :as sut]
     [speclj.core :refer :all]))
 
-(def flat-config
-  {:google {:project "marigold"
-            :push    {:endpoint        "https://isaac.example/google/pubsub"
-                      :service-account "push@marigold.iam.gserviceaccount.com"}}})
+(def one-tenant-config
+  {:google {:tonotop {:project "marigold"
+                      :push    {:endpoint        "https://isaac.example/google/pubsub"
+                                :service-account "push@marigold.iam.gserviceaccount.com"}}}})
 
 (def two-tenant-config
   {:google {:tonotop {:project "marigold"
@@ -18,12 +18,12 @@
 
 (describe "the push door's trust rules"
 
-  (context "one rule per organization (isaac-1zkz)"
+  (context "one rule per organization (isaac-1zkz, isaac-okfj)"
 
-    (it "names a flat host's rule :google-pubsub, as it always was"
-      (should= [:google-pubsub] (keys (sut/trust-rules flat-config))))
+    (it "names a one-organization host's rule after that organization too"
+      (should= [:google-pubsub/tonotop] (keys (sut/trust-rules one-tenant-config))))
 
-    (it "names each tenant's rule after the tenant"
+    (it "names each organization's rule after the organization"
       (should= [:google-pubsub/acme :google-pubsub/tonotop]
                (sort (keys (sut/trust-rules two-tenant-config)))))
 
@@ -35,17 +35,20 @@
         (should= [:google :acme :push :service-account] (get-in rule [:claims :email]))
         (should= true (get-in rule [:claims :email_verified]))))
 
-    (it "keeps a flat host's refs at the paths written before tenants"
-      (let [rule (get (sut/trust-rules flat-config) :google-pubsub)]
-        (should= [:google :push :endpoint] (:audience rule))
-        (should= [:google :push :service-account] (get-in rule [:claims :email]))))
+    (it "names the organization in a one-organization host's refs as well"
+      (let [rule (get (sut/trust-rules one-tenant-config) :google-pubsub/tonotop)]
+        (should= [:google :tonotop :push :endpoint] (:audience rule))
+        (should= [:google :tonotop :push :service-account] (get-in rule [:claims :email]))))
+
+    (it "has no rule for a flat config, which is no organizations at all"
+      (should= {} (sut/trust-rules {:google {:project "marigold"}})))
 
     (it "trusts only tokens Google itself signed"
-      (let [rule (get (sut/trust-rules flat-config) :google-pubsub)]
+      (let [rule (get (sut/trust-rules one-tenant-config) :google-pubsub/tonotop)]
         (should= "https://accounts.google.com" (:issuer rule))
         (should= "https://www.googleapis.com/oauth2/v3/certs" (:jwks rule))))
 
-    (it "grants each tenant's principal nothing but the push scope"
+    (it "grants each organization's principal nothing but the push scope"
       (let [rule (get (sut/trust-rules two-tenant-config) :google-pubsub/tonotop)]
         (should= :google-pubsub/tonotop (get-in rule [:principal :name]))
         (should= #{:google/push} (get-in rule [:principal :scopes]))))

@@ -9,9 +9,9 @@ Feature: Who spoke
   Background:
     Given an Isaac root at "target/test-state"
     And config:
-      | google.oauth.client-id     | isaac-test.apps.googleusercontent.com |
-      | google.oauth.client-secret | shh                                   |
-      | google.oauth.account       | yopp@tonotop.com                      |
+      | google.tonotop.oauth.client-id     | isaac-test.apps.googleusercontent.com |
+      | google.tonotop.oauth.client-secret | shh                                   |
+      | google.tonotop.oauth.account       | yopp@tonotop.com                      |
 
   Scenario: a Chat users/<id> resolves to the Workspace name and email
     Given the Google People API knows "users/1234" as "Micah Martin" with email "micah@tonotop.com"

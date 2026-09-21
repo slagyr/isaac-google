@@ -5,7 +5,11 @@
    twice: by the project in the subscription name, and by the service account
    whose OIDC token the request proved. Both must agree, and the tenant they
    agree on is stamped on the persisted event so the worker acts as the right
-   organization (isaac-1zkz)."
+   organization (isaac-1zkz).
+
+   A host that configured no organization has no one to own a push, so the
+   door refuses it rather than keeping an event nobody answers for — which is
+   what the flat `:google {:project ...}` shape now is (isaac-okfj)."
   (:require
     [cheshire.core :as json]
     [isaac.config.loader :as loader]
@@ -48,6 +52,13 @@
                            (as-> n (second (re-find #"^(spaces/[^/]+)" n)))))]
     (health/record-last-event! root k now)))
 
+(defn- refuse-no-organization [event principal]
+  (log/warn :google/no-organization
+            :principal principal
+            :message-id (:message-id event)
+            :message "no Google organization is configured; :google is a map of organization id to config")
+  {:status 401 :headers {} :body ""})
+
 (defn- refuse-mismatch [decision event principal]
   (log/warn :google/tenant-mismatch
             :principal principal
@@ -60,9 +71,16 @@
   (let [root      (or (nexus/get :root) (get-in request [:isaac/root]))
         event     (push/unwrap (read-body request))
         principal (get-in request [:isaac/principal :name])
-        decision  (tenants/tenant-of-push (live-config request root) event principal)]
-    (if (:refused decision)
+        config    (live-config request root)
+        decision  (tenants/tenant-of-push config event principal)]
+    (cond
+      (empty? (tenants/tenants config))
+      (refuse-no-organization event principal)
+
+      (:refused decision)
       (refuse-mismatch decision event principal)
+
+      :else
       (let [tenant (:tenant decision)
             event  (assoc event :tenant tenant)
             now    (or (memory/now) (Instant/now))]

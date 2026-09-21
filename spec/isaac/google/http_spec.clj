@@ -65,10 +65,24 @@
         (should= [] (inbox/pending "/test/isaac"))
         (should= 1 (count (filter #(= :google/tenant-mismatch (:event %)) @log/captured-logs)))))
 
-    (it "stamps a flat host's push as the default tenant"
+    ;; One organization is written the same way as several, so its pushes are
+    ;; stamped with its own id — there is no default (isaac-okfj).
+    (it "stamps a one-organization host's push with that organization"
       (sut/handler (push-request {:id           "m-5"
                                   :subscription "projects/marigold/subscriptions/isaac"
-                                  :principal    :google-pubsub
-                                  :config       {:google {:project "marigold"}}}))
-      (should= [:default] (mapv :tenant (inbox/pending "/test/isaac")))))
+                                  :principal    :google-pubsub/tonotop
+                                  :config       {:google {:tonotop {:project "marigold"}}}}))
+      (should= [:tonotop] (mapv :tenant (inbox/pending "/test/isaac"))))
+
+    ;; The flat shape isaac-1zkz accepted names no organization, so nothing on
+    ;; this host could own the push. Refuse it rather than keep an event no
+    ;; organization answers for (isaac-okfj).
+    (it "refuses a push when no organization is configured"
+      (let [response (sut/handler (push-request {:id           "m-6"
+                                                 :subscription "projects/marigold/subscriptions/isaac"
+                                                 :principal    :google-pubsub/tonotop
+                                                 :config       {:google {:project "marigold"}}}))]
+        (should= 401 (:status response))
+        (should= [] (inbox/pending "/test/isaac"))
+        (should= 1 (count (filter #(= :google/no-organization (:event %)) @log/captured-logs))))))
   )

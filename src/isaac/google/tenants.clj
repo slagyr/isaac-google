@@ -1,91 +1,91 @@
 (ns isaac.google.tenants
-  "One Isaac host, several Google organizations.
+  "One Isaac host, one or several Google organizations.
 
    Everything Google is per organization: the GCP project, the Pub/Sub topic,
    the push service account, the OAuth client, and the Google user Isaac signs
-   in as. A tenant is that complete set, not a namespace over one login.
+   in as. An organization is that complete set, not a namespace over one login.
 
-   A deployment with one organization writes the flat map it always wrote
-   (`:google {:project ...}`) and reads as the single tenant `:default`;
-   nothing about that deployment changes. A deployment with several writes
-   `:google {:tonotop {...} :acme {...}}` (isaac-1zkz)."
+   There is exactly one way to write it. `:google` is a map of organization id
+   to that organization's config, whether the host serves one organization or
+   ten:
+
+       :google {:tonotop {:project \"tonotop-yopp\" :oauth {...} :push {...}}}
+
+   The flat `:google {:project ...}` isaac-1zkz also accepted is gone: a second
+   shape for the same thing left a reader guessing which one was meant, and
+   made a working config report every nested field as an unknown key. A flat
+   map is now a config error naming the shape, never a silent reinterpretation
+   (isaac-okfj)."
   (:require
     [clojure.string :as str]))
 
-(def DEFAULT
-  "Tenant id of a flat, single-organization `:google` config."
-  :default)
-
-(def ^:private tenant-fields
-  "Keys of one tenant's own config. Their presence is what tells a flat map
-   from a map of tenant id -> tenant."
+(def organization-fields
+  "Keys of one organization's own config. Finding one of these directly under
+   `:google` means the config was written flat — that is an error the schema
+   reports, not a map of organizations."
   #{:project :topic :oauth :push :health :renew-within-hours})
 
 (def ^:dynamic *tenant*
-  "Tenant the current thread is acting as. The push door binds it for a
+  "Organization the current thread is acting as. The push door binds it for a
    handler; a comm binds it for a send."
   nil)
 
-(defn- flat? [slice]
-  (boolean (some tenant-fields (keys slice))))
+(defn organizations?
+  "Is this `:google` slice the one shape Isaac reads — a non-empty map of
+   organization id to that organization's map?"
+  [slice]
+  (boolean (and (map? slice)
+                (seq slice)
+                (not-any? organization-fields (keys slice))
+                (every? map? (vals slice)))))
 
 (defn tenants
-  "config -> {tenant-id tenant-config}. A flat `:google` map reads as
-   `{:default <that map>}`."
+  "config -> {organization-id organization-config}. Anything that is not the
+   declared map of organizations reads as none configured; the schema is what
+   says so out loud."
   [config]
   (let [slice (:google config)]
-    (cond
-      (not (map? slice)) {}
-      (empty? slice) {}
-      (flat? slice) {DEFAULT slice}
-      :else (into {} (filter (comp map? val)) slice))))
+    (if (organizations? slice) slice {})))
 
 (defn ids
-  "Every configured tenant id, sorted."
+  "Every configured organization id, sorted."
   [config]
   (vec (sort (keys (tenants config)))))
 
 (defn tenant-config
-  "One tenant's complete set, or nil when nobody declared it."
+  "One organization's complete set, or nil when nobody declared it."
   [config id]
   (get (tenants config) id))
 
 (defn config-path
-  "Path into the live config at which `id`'s settings sit. A flat config keeps
-   `[:google]` so the config refs written before tenants still resolve."
-  [config id]
-  (let [slice (:google config)]
-    (if (and (= DEFAULT id)
-             (or (not (map? slice)) (empty? slice) (flat? slice)))
-      [:google]
-      [:google id])))
+  "Path into the live config at which `id`'s settings sit."
+  [_config id]
+  [:google id])
 
 (defn resolve-id
-  "Which tenant to act as: the one named, else the one bound to this thread,
-   else the only one configured, else :default."
+  "Which organization to act as: the one named, else the one bound to this
+   thread, else the only one configured. nil when a host with several names
+   none, and when none is configured at all."
   ([config] (resolve-id config nil))
   ([config id]
    (or id
        *tenant*
        (let [configured (ids config)]
-         (if (= 1 (count configured))
-           (first configured)
-           DEFAULT)))))
+         (when (= 1 (count configured))
+           (first configured))))))
 
 (defn auth-provider
-  "Auth-store provider key for a tenant's tokens. The default tenant keeps the
-   plain \"google\" key, so a single-organization host's existing login stands."
+  "Auth-store provider key for an organization's tokens. One key per
+   organization, always namespaced — there is no unnamed Google login."
   [id]
-  (if (or (nil? id) (= DEFAULT id))
-    "google"
-    (str "google/" (name id))))
+  (when id (str "google/" (name id))))
 
 (defn- subscription-project [subscription]
   (second (re-find #"^projects/([^/]+)/" (str subscription))))
 
 (defn tenant-for-subscription
-  "Which tenant a Pub/Sub push came from, by the project in its subscription
-   name. nil when no configured tenant owns that project."
+  "Which organization a Pub/Sub push came from, by the project in its
+   subscription name. nil when no configured organization owns that project."
   [config subscription]
   (when-let [project (subscription-project subscription)]
     (some (fn [[id tenant]]
@@ -93,22 +93,20 @@
           (sort-by key (tenants config)))))
 
 (defn principal-tenant
-  "Which tenant a door principal speaks for. The flat host's principal is the
-   plain `:google-pubsub`; a tenanted host's is `:google-pubsub/<tenant>`."
+  "Which organization a door principal speaks for. Every rule grants
+   `:google-pubsub/<organization>`; a bare `:google-pubsub` names none."
   [principal-name]
-  (when principal-name
-    (if (namespace principal-name)
-      (keyword (name principal-name))
-      (when (= "google-pubsub" (name principal-name)) DEFAULT))))
+  (when (and principal-name (namespace principal-name))
+    (keyword (name principal-name))))
 
 (defn tenant-of-push
-  "Which tenant owns this push: `{:tenant id}`, or
+  "Which organization owns this push: `{:tenant id}`, or
    `{:refused :tenant-mismatch ...}` when the subscription it arrived on and
    the service account that signed it belong to different organizations.
 
    Two independent claims — the project in the subscription name and the
    principal the token proved — must agree. A host that configured no
-   `:project` has only the principal to go on, which is the flat case."
+   `:project` for an organization has only the principal to go on."
   [config event principal-name]
   (let [by-subscription (tenant-for-subscription config (:subscription event))
         by-principal    (principal-tenant principal-name)]
@@ -138,7 +136,8 @@
 
 (defn of-comm
   "Which organization a comm speaks for: the one its slice names, else the
-   only one configured, else the default tenant.
+   only one configured. A comm on a one-organization host names none — that
+   is a default *value*, not a second config shape.
 
    The key is namespaced per comm kind — :gchat/google, :gmail/google — like
    every other key a comm contributes. A bare :google collides in the composed
@@ -148,9 +147,8 @@
   (if-let [named (some slice [:gchat/google :gmail/google :google])]
     (keyword named)
     (let [configured (ids config)]
-      (if (= 1 (count configured))
-        (first configured)
-        DEFAULT))))
+      (when (= 1 (count configured))
+        (first configured)))))
 
 (defn comms-for
   "The comms of one kind that speak for one organization."

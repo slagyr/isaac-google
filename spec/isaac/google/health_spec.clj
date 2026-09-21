@@ -11,7 +11,7 @@
   (it "flags silence when last event is older than the threshold"
     (let [conditions (sut/evaluate
                        {:now    now
-                        :config {:google {:health {:silent-after-hours 6}}}
+                        :config {:google {:tonotop {:health {:silent-after-hours 6}}}}
                         :keys   ["spaces/ENG"]
                         :state  {:last-event-at {"spaces/ENG" "2026-09-18T04:00:00Z"}
                                  :door-last-hit "2026-09-18T11:00:00Z"}
@@ -22,7 +22,7 @@
   (it "flags expiry when Google expiry is in the past"
     (let [conditions (sut/evaluate
                        {:now    now
-                        :config {:google {:health {:silent-after-hours 6}}}
+                        :config {:google {:tonotop {:health {:silent-after-hours 6}}}}
                         :keys   ["spaces/ENG"]
                         :state  {:last-event-at {"spaces/ENG" "2026-09-18T11:30:00Z"}
                                  :door-last-hit "2026-09-18T11:00:00Z"}
@@ -33,7 +33,7 @@
   (it "flags an unreached door when the door is up and door-last-hit is missing"
     (let [conditions (sut/evaluate
                        {:now     now
-                        :config  {:google {:health {:silent-after-hours 6}}}
+                        :config  {:google {:tonotop {:health {:silent-after-hours 6}}}}
                         :keys    ["spaces/ENG"]
                         :door-up? true
                         :state   {:last-event-at {"spaces/ENG" "2026-09-18T04:00:00Z"}}
@@ -43,7 +43,7 @@
   (it "does not flag the door when the server is not up"
     (let [conditions (sut/evaluate
                        {:now    now
-                        :config {:google {:health {:silent-after-hours 6}}}
+                        :config {:google {:tonotop {:health {:silent-after-hours 6}}}}
                         :keys   ["spaces/ENG"]
                         :state  {:last-event-at {"spaces/ENG" "2026-09-18T11:30:00Z"}}
                         :remote {"spaces/ENG" {:expires-at "2026-09-25T12:00:00Z"}}})]

@@ -7,6 +7,7 @@
     [isaac.foundation.cli-steps :as fcli]
     [isaac.fs :as fs]
     [cheshire.core :as json]
+    [isaac.config.loader :as loader]
     [isaac.google.component :as google-component]
     [isaac.google.events :as google-events]
     [isaac.google.handler :as google-handler]
@@ -57,6 +58,26 @@
 
 (defn- feature-root []
   (or (g/get :root) "target/test-state"))
+
+(defn- feature-config
+  "The config this scenario wrote: the running server's when there is one,
+   else loaded from the feature root the way the CLI loads it."
+  []
+  (let [served (or (g/get :server-config) {})]
+    (if (seq (tenants/tenants served))
+      served
+      (or (:config (loader/load-config-result {:root (feature-root) :fs (feature-fs)})) {}))))
+
+(defn- feature-provider
+  "The auth-store provider key a scenario means by \"the google auth store\":
+   the host's only Google organization. Every login belongs to one
+   organization, so a scenario that configured none has no store to speak of
+   (isaac-okfj)."
+  []
+  (or (tenants/auth-provider (tenants/resolve-id (feature-config)))
+      (throw (ex-info (str "this scenario configured no Google organization: "
+                           "write google.<organization>.oauth.client-id")
+                      {}))))
 
 (defn- with-feature-fs [f]
   (nexus/-with-nested-nexus {:fs (feature-fs)}
@@ -118,21 +139,22 @@
   [at rt]
   (with-feature-fs
     (fn []
-      (let [tokens (auth-store/load-tokens (feature-root) "google" (feature-fs))]
+      (let [provider (feature-provider)
+            tokens   (auth-store/load-tokens (feature-root) provider (feature-fs))]
         (if (or tokens (g/get :google-token-stub))
           (do
             (g/should tokens)
             (g/should= at (:access tokens))
             (g/should= rt (:refresh tokens)))
-          (auth-store/save-tokens! (feature-root) "google"
+          (auth-store/save-tokens! (feature-root) provider
                                    {:access_token  at
                                     :refresh_token rt
                                     :expires_in    3600}
                                    (feature-fs)))))))
 
 (defn google-auth-store-for-tenant-has-access-and-refresh
-  "Then: assert one organization's stored tokens. Given: seed them when the
-   store is empty (isaac-1zkz)."
+  "Then: assert one named organization's stored tokens. Given: seed them when
+   the store is empty (isaac-1zkz)."
   [tenant at rt]
   (with-feature-fs
     (fn []
@@ -152,7 +174,7 @@
 (defn google-auth-store-has-expired-access [rt]
   (with-feature-fs
     (fn []
-      (auth-store/save-tokens! (feature-root) "google"
+      (auth-store/save-tokens! (feature-root) (feature-provider)
                                {:access_token  "at-expired"
                                 :refresh_token rt
                                 :expires_in    -1}

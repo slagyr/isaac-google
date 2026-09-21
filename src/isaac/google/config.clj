@@ -45,19 +45,18 @@
 (def tenant-schema
   {:name        :google-tenant
    :type        :map
+   :message     "must be a map of one Google organization's config — :google is a map of organization id to config, e.g. google.tonotop.oauth.client-id"
    :description "One Google organization Isaac serves."
    :schema      tenant-fields})
 
 (def google-schema
-  "Flat or tenanted, in one spec.
-
-   The declared fields are one organization's settings — a single-organization
-   host writes them straight under :google, as it always has, and reads as
-   tenant :default. Any other key is a tenant id whose value is that tenant's
-   own complete set. The foundation validates the declared fields closed and
-   descends into every other key against :value-spec (isaac-1zkz)."
-  (merge tenant-schema
-         {:name        :google
-          :description "Shared Google Workspace plumbing — OAuth, Pub/Sub topic, GCP project. Flat for one organization; a map of tenant id -> organization for several."
-          :key-spec    {:type :keyword}
-          :value-spec  tenant-schema}))
+  "One shape: `:google` is a map of organization id to that organization's
+   complete set, whether the host serves one organization or several. There is
+   no flat form and no default organization, so there is nothing to mis-apply:
+   every key under :google is an organization id, and its value is validated
+   against :value-spec (isaac-okfj, closing isaac-pvfq)."
+  {:name        :google
+   :type        :map
+   :description "Shared Google Workspace plumbing, per Google organization — OAuth, Pub/Sub topic, GCP project. A map of organization id to that organization's config."
+   :key-spec    {:type :keyword}
+   :value-spec  tenant-schema})

@@ -21,12 +21,12 @@
       (should= #{} (set (map :id (scheduler/list-tasks sched))))
       (scheduler/shutdown! sched)))
 
-  ;; One door, one trust rule per organization. The manifest can only declare
-  ;; the flat rule (its config refs are static paths), so a tenanted host gets
-  ;; its rules registered at boot (isaac-1zkz).
+  ;; One door, one trust rule per organization. A rule's config refs are static
+  ;; paths that must name an organization, which the manifest cannot know, so
+  ;; every rule is registered at boot (isaac-1zkz, isaac-okfj).
   (context "the door's trust rules (isaac-1zkz)"
 
-    (it "registers one rule per tenant at start"
+    (it "registers one rule per organization at start"
       (let [registered (atom [])
             sched      (scheduler/create {})]
         (nexus/-with-nexus {:scheduler sched}
@@ -36,13 +36,13 @@
         (should= [:google-pubsub/acme :google-pubsub/tonotop] (sort @registered))
         (scheduler/shutdown! sched)))
 
-    (it "registers a flat host's single rule, named as it always was"
+    (it "registers a one-organization host's single rule, named after it"
       (let [registered (atom [])
             sched      (scheduler/create {})]
         (nexus/-with-nexus {:scheduler sched}
-          (sut/start! {:config             {:google {:project "marigold"}}
+          (sut/start! {:config             {:google {:tonotop {:project "marigold"}}}
                        :register-identity! (fn [entry] (swap! registered conj (first entry)))}))
-        (should= [:google-pubsub] @registered)
+        (should= [:google-pubsub/tonotop] @registered)
         (scheduler/shutdown! sched)))
 
     ;; A host that starts no background services still answers pushes, so the
@@ -56,8 +56,8 @@
 
     (it "takes the live config when no config is named"
       (let [registered (atom [])]
-        (loader/set-snapshot! {:google {:project "marigold"}} "component spec")
+        (loader/set-snapshot! {:google {:tonotop {:project "marigold"}}} "component spec")
         (with-redefs [door/registrar (fn [] (fn [entry] (swap! registered conj (first entry))))]
           (sut/register-door! nil nil))
-        (should= [:google-pubsub] @registered))))
+        (should= [:google-pubsub/tonotop] @registered))))
   )

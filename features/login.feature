@@ -1,6 +1,8 @@
 Feature: Google user login
-  isaac-google signs in as the Google user with the authorization-code
-  flow and keeps the tokens in the auth store under provider "google".
+  isaac-google signs in as one Google organization's user with the
+  authorization-code flow and keeps the tokens in the auth store under
+  provider "google/<organization>". A host with one organization may leave
+  `--tenant` off: there is only one to mean (isaac-okfj).
   Google does not offer the device flow for Chat and Gmail scopes, so the
   login prints an authorization URL and accepts the pasted code. The token
   POST goes through the agent's HTTP client so outbound-request steps see it.
@@ -9,9 +11,9 @@ Feature: Google user login
   Background:
     Given an Isaac root at "target/test-state"
     And config:
-      | google.oauth.client-id     | isaac-test.apps.googleusercontent.com |
-      | google.oauth.client-secret | shh                                   |
-      | google.oauth.account       | yopp@tonotop.com                      |
+      | google.tonotop.oauth.client-id     | isaac-test.apps.googleusercontent.com |
+      | google.tonotop.oauth.client-secret | shh                                   |
+      | google.tonotop.oauth.account       | yopp@tonotop.com                      |
 
   Scenario: a pasted code is exchanged and the tokens are stored
     Given the Google token endpoint returns access token "at-1" and refresh token "rt-1" expiring in 3600
@@ -44,11 +46,11 @@ Feature: Google user login
     And the stdout contains "openid"
     And the stdout contains "chat.messages.readonly"
 
-  Scenario: missing config fails closed
+  Scenario: missing config fails closed, naming the organization it wants
     Given Isaac root "target/test-state" has no config file
     When isaac is run with "google login"
     Then the exit code is 1
-    And the stderr contains "google.oauth.client-id"
+    And the stderr contains "google.<organization>.oauth.client-id"
 
   Scenario: a dead refresh token says why
     Given the google auth store has an expired access token with refresh "rt-old"

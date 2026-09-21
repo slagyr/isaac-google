@@ -3,22 +3,24 @@ Feature: Google Pub/Sub push door
   is an identity source under per-principal auth (isaac-gym1): Google's
   OIDC token for this door — signed by a key at Google's JWKS, issued by
   accounts.google.com, audience the configured endpoint, from the
-  configured push service account — is principal google-pubsub with scope
-  :google/push and nothing more. isaac-http owns the verification
-  (isaac-4sqh); this module contributes the trust rule. Accepted events are
-  persisted and answered 204 before any handler runs; an inbox worker hands
-  them to the handler a module contributed for the event type.
-  Beans: isaac-1jep, isaac-x37l.
+  configured push service account — is principal google-pubsub/<organization>
+  with scope :google/push and nothing more. isaac-http owns the verification
+  (isaac-4sqh); this module registers one trust rule per configured Google
+  organization at start. Accepted events are persisted and answered 204
+  before any handler runs; an inbox worker hands them to the handler a module
+  contributed for the event type.
+  Beans: isaac-1jep, isaac-x37l, isaac-okfj.
 
   Background:
     Given an Isaac root at "target/test-state"
     And config:
-      | google.topic                | projects/marigold/topics/isaac               |
-      | google.push.endpoint        | https://isaac.example/google/pubsub          |
-      | google.push.service-account | pubsub-push@marigold.iam.gserviceaccount.com |
+      | google.tonotop.topic                | projects/marigold/topics/isaac               |
+      | google.tonotop.push.endpoint        | https://isaac.example/google/pubsub          |
+      | google.tonotop.push.service-account | pubsub-push@marigold.iam.gserviceaccount.com |
     And Google signs push tokens with a test key
     And the skybeam fixture module handles Google events of type "google.workspace.chat.message.v1.created"
     And the Isaac server is started
+    And the Google runtime component is started
 
   Scenario: a valid push is persisted and acknowledged before any handler runs
     When Google pushes message "m-1" of type "google.workspace.chat.message.v1.created" with data:
@@ -29,8 +31,8 @@ Feature: Google Pub/Sub push door
     And the isaac file "google/inbox/pending/m-1.edn" exists
     And the skybeam handler received no messages
     And the log has entries matching:
-      | level | event                 | principal     | message-id |
-      | :info | :google/push-received | google-pubsub | m-1        |
+      | level | event                 | principal              | message-id |
+      | :info | :google/push-received | :google-pubsub/tonotop | m-1        |
     When the inbox worker ticks
     Then the skybeam handler received message "m-1"
     And the isaac file "google/inbox/done/m-1.edn" exists

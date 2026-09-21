@@ -3,11 +3,10 @@
 
    isaac-http verifies Google's OIDC token against a data-shaped rule whose
    :audience and :claims may be config refs (static paths into live config).
-   One rule therefore proves one organization, so a host serving several needs
-   one rule per tenant, each pointed at that tenant's own endpoint and push
-   service account, granting a principal named after the tenant. A flat host
-   keeps the plain `:google-pubsub` rule and the paths it always had
-   (isaac-1zkz)."
+   One rule therefore proves one organization, so a host gets one rule per
+   configured organization, each pointed at that organization's own endpoint
+   and push service account, granting a principal named after it. There is no
+   unnamed rule, because there is no unnamed organization (isaac-okfj)."
   (:require
     [isaac.google.tenants :as tenants]))
 
@@ -16,12 +15,9 @@
 (def SCOPE :google/push)
 
 (defn principal-name
-  "The principal a tenant's rule grants. The flat host's is the plain
-   `:google-pubsub` the door has always answered to."
+  "The principal an organization's rule grants, always named after it."
   [id]
-  (if (or (nil? id) (= tenants/DEFAULT id))
-    :google-pubsub
-    (keyword "google-pubsub" (name id))))
+  (when id (keyword "google-pubsub" (name id))))
 
 (defn- trust-rule [config id]
   (let [push (conj (tenants/config-path config id) :push)

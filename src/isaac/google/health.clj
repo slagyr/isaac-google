@@ -5,6 +5,7 @@
     [clojure.pprint :as pprint]
     [isaac.comm.delivery.queue :as queue]
     [isaac.fs :as fs]
+    [isaac.google.tenants :as tenants]
     [isaac.logger :as log]
     [isaac.nexus :as nexus])
   (:import (java.time Duration Instant)))
@@ -45,9 +46,19 @@
   (when (and earlier later)
     (.toHours (Duration/between earlier later))))
 
+(defn- declared-silent-hours
+  "The silence threshold to judge by. Each organization may set its own; the
+   health pass runs once over every organization's keys, so it judges by the
+   one being acted as when there is one, else the first organization that
+   declares a threshold (isaac-okfj)."
+  [config]
+  (let [orgs (tenants/tenants config)]
+    (or (get-in (get orgs tenants/*tenant*) [:health :silent-after-hours])
+        (some (fn [[_ org]] (get-in org [:health :silent-after-hours]))
+              (sort-by key orgs)))))
+
 (defn- silent-hours-cfg [config]
-  (let [v (or (get-in config [:google :health :silent-after-hours])
-              (get-in config [:google/health :silent-after-hours]))]
+  (let [v (declared-silent-hours config)]
     (cond
       (int? v) v
       (number? v) (long v)

@@ -2,10 +2,10 @@
   "Public seam other modules call for a valid Google access token.
    Refreshes when needed; never prompts.
 
-   One token per tenant: each Google organization has its own OAuth client and
-   its own Google user, so a tenant's tokens are stored under its own provider
-   key and refreshed with its own credentials. A single-organization host keeps
-   the plain \"google\" key it always had (isaac-1zkz)."
+   One token per organization: each has its own OAuth client and its own
+   Google user, so its tokens are stored under its own provider key —
+   \"google/<organization>\" — and refreshed with its own credentials. There is
+   no unnamed Google login (isaac-okfj)."
   (:require
     [clojure.string :as str]
     [isaac.config.loader :as loader]
@@ -40,13 +40,14 @@
           {}))))
 
 (defn- login-message
-  "`isaac google login` for one organization; the tenant is named when there
-   are several, so the message says which login is missing."
+  "`isaac google login` for one organization, named — every login is one
+   organization's."
   [id]
-  (if (or (nil? id) (= tenants/DEFAULT id))
-    "Missing Google login. Run `isaac google login` first."
-    (str "Missing Google login for tenant " (name id)
-         ". Run `isaac google login --tenant " (name id) "` first.")))
+  (if id
+    (str "Missing Google login for organization " (name id)
+         ". Run `isaac google login --tenant " (name id) "` first.")
+    (str "No Google organization named. Configure google.<organization> and run "
+         "`isaac google login --tenant <organization>` first.")))
 
 (defn- refresh-via-http! [auth-dir fs* provider tokens creds]
   (let [response (oauth/refresh! creds (:refresh tokens))]
@@ -72,8 +73,8 @@
 
 (defn resolve-tokens
   "Returns `id`'s stored token map (with :access) after refreshing if needed,
-   or an error map {:error :auth-failed :message ...}. With no tenant named,
-   acts as the tenant bound to this thread, else the only one configured."
+   or an error map {:error :auth-failed :message ...}. With no organization
+   named, acts as the one bound to this thread, else the only one configured."
   ([]
    (resolve-tokens (load-config)))
   ([config]
@@ -83,7 +84,7 @@
          provider (tenants/auth-provider id)
          auth-dir (auth-root)
          fs*      (feature-fs)
-         tokens   (auth-store/load-tokens auth-dir provider fs*)]
+         tokens   (when provider (auth-store/load-tokens auth-dir provider fs*))]
      (cond
        (nil? tokens)
        {:error :auth-failed :message (login-message id)}
@@ -99,7 +100,7 @@
          (or (:tokens result) result))))))
 
 (defn token
-  "Valid Google access token string for a tenant, refreshing when needed.
+  "Valid Google access token string for an organization, refreshing when needed.
    Never prompts. Throws on auth failure so callers cannot silently proceed
    without a token."
   ([] (token nil))

@@ -73,6 +73,10 @@
   (context "an entry Google cannot list (:remote and :delete! hooks)"
 
     (with calls (atom []))
+    ;; Every reconcile is one organization's: with none configured there is no
+    ;; token to reach Google with, so there is nothing to reconcile
+    ;; (isaac-okfj).
+    (with cfg {:google {:tonotop {:project "p-tonotop"}}})
     (with entry (let [calls @calls]
                   {:create! (fn [k] (swap! calls conj [:create k])
                               {:name k :expiration "1790424000000"})
@@ -93,29 +97,35 @@
 
     (it "creates on the first tick, remembers the expiry, and does not create again"
       (sut/register! [:gmail-watch @entry])
-      (sut/tick! {:now now :root root :door-up? true})
+      (sut/tick! {:now now :root root :config @cfg :door-up? true})
       (should= [[:create "yopp@tonotop.com"]] @@calls)
       (should= "2026-09-26T12:00:00Z" (get-in (sut/load-state root) ["yopp@tonotop.com" :expires-at]))
-      (sut/tick! {:now now :root root :door-up? true})
+      (sut/tick! {:now now :root root :config @cfg :door-up? true})
       (should= [[:create "yopp@tonotop.com"]] @@calls))
 
     (it "renews through :renew! once the remembered expiry is inside the window"
       (sut/register! [:gmail-watch @entry])
       (sut/save-state! root {"yopp@tonotop.com" {:name "yopp@tonotop.com" :expires-at "2026-09-19T06:00:00Z"}})
-      (sut/tick! {:now now :root root :door-up? true})
+      (sut/tick! {:now now :root root :config @cfg :door-up? true})
       (should= [[:renew "yopp@tonotop.com"]] @@calls))
 
     (it "ticks with no :door-up? in opts the way the scheduler calls it, deciding door state itself"
       (sut/register! [:gmail-watch @entry])
-      (should-not-throw (sut/tick! {:root root}))
+      (should-not-throw (sut/tick! {:root root :config @cfg}))
       (should= [[:create "yopp@tonotop.com"]] @@calls))
 
     (it "stops through :delete! when the key left config"
       (sut/register! [:gmail-watch (assoc @entry :key (fn [] []) :remote (fn [] (sut/load-state root)))])
       (sut/save-state! root {"yopp@tonotop.com" {:name "yopp@tonotop.com" :expires-at "2026-09-24T12:00:00Z"}})
-      (sut/tick! {:now now :root root :door-up? true})
+      (sut/tick! {:now now :root root :config @cfg :door-up? true})
       (should= [[:stop "yopp@tonotop.com"]] @@calls)
       (should= {} (sut/load-state root)))
+
+    ;; No organizations, no reconcile: there is no default to act as.
+    (it "does nothing for a host that configured no organization"
+      (sut/register! [:gmail-watch @entry])
+      (sut/tick! {:now now :root root :config {} :door-up? true})
+      (should= [] @@calls))
     )
   
 

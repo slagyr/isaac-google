@@ -38,12 +38,15 @@
       (sut/tick!)
       (should= [:acme] @seen)))
 
-  (it "acts as the default tenant for an event with none"
+  ;; No default organization: an event the door could not attribute runs with
+  ;; no organization bound, and the handler's own token lookup says so
+  ;; (isaac-okfj).
+  (it "names no organization for an event the door stamped with none"
     (let [seen (atom [])]
       (handler/register-handler! ["chat/created" (fn [_] (swap! seen conj tenants/*tenant*))])
       (accept! {:message-id "m-3" :type "chat/created" :data {}})
       (sut/tick!)
-      (should= [:default] @seen)))
+      (should= [nil] @seen)))
 
   (it "leaves the thread's tenant unbound after the handler returns"
     (handler/register-handler! ["chat/created" (fn [_] nil)])

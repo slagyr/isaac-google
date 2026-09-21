@@ -1,13 +1,34 @@
 Feature: Several Google organizations on one Isaac
   Everything Google is per organization: the GCP project, the Pub/Sub topic,
   the push service account, the OAuth client, and the Google user Isaac signs
-  in as. A tenant is that complete set, not a namespace over one login. A host
-  with one organization writes the flat `google.*` config it always wrote and
-  reads as the single tenant `default`; a host with several names them, and
-  every door, token, registration and CLI answer is that tenant's own.
-  Bean: isaac-1zkz.
+  in as. An organization is that complete set, not a namespace over one login.
+  There is one way to write it, whether a host serves one organization or ten:
+  `google.<organization>.*`. There is no flat form and no default organization,
+  so a reader never has to ask which shape was meant, and a nested config is
+  never reported as unknown keys.
+  Beans: isaac-1zkz, isaac-okfj.
 
-  Scenario: a single-organization host is unchanged and its pushes are the default tenant's
+  Scenario: a one-organization host writes the same shape as a host with several
+    Given an Isaac root at "target/test-state"
+    And config:
+      | google.tonotop.project              | marigold                                     |
+      | google.tonotop.topic                | projects/marigold/topics/isaac               |
+      | google.tonotop.push.endpoint        | https://isaac.example/google/pubsub          |
+      | google.tonotop.push.service-account | pubsub-push@marigold.iam.gserviceaccount.com |
+    And Google signs push tokens with a test key
+    And the skybeam fixture module handles Google events of type "google.workspace.chat.message.v1.created"
+    And the Isaac server is started
+    And the Google runtime component is started
+    When Google pushes message "m-one" of type "google.workspace.chat.message.v1.created" with data:
+      """
+      {"message": {"name": "spaces/AAA/messages/1"}}
+      """
+    Then the response status is 204
+    And the log has entries matching:
+      | level | event                 | principal              | tenant   |
+      | :info | :google/push-received | :google-pubsub/tonotop | :tonotop |
+
+  Scenario: the flat config isaac-1zkz accepted configures no organization at all
     Given an Isaac root at "target/test-state"
     And config:
       | google.topic                | projects/marigold/topics/isaac               |
@@ -16,14 +37,16 @@ Feature: Several Google organizations on one Isaac
     And Google signs push tokens with a test key
     And the skybeam fixture module handles Google events of type "google.workspace.chat.message.v1.created"
     And the Isaac server is started
+    And the Google runtime component is started
     When Google pushes message "m-flat" of type "google.workspace.chat.message.v1.created" with data:
       """
       {"message": {"name": "spaces/AAA/messages/1"}}
       """
-    Then the response status is 204
-    And the log has entries matching:
-      | level | event                 | principal     | tenant   |
-      | :info | :google/push-received | google-pubsub | :default |
+    Then the response status is 401
+    And the isaac file "google/inbox/pending/m-flat.edn" does not exist
+    When isaac is run with "google status"
+    Then the exit code is 0
+    And the stdout contains "No Google organization configured"
 
   Scenario: two organizations share the door, each proved by its own service account
     Given an Isaac root at "target/test-state"

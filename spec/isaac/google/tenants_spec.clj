@@ -1,7 +1,7 @@
 (ns isaac.google.tenants-spec
   (:require
     [isaac.google.tenants :as sut]
-    [speclj.core :refer [context describe it should= should-be-nil]]))
+    [speclj.core :refer [context describe it should= should-be-nil should-not should]]))
 
 (def flat-config
   {:google {:project "marigold"
@@ -10,21 +10,24 @@
             :push    {:endpoint        "https://isaac.example/google/pubsub"
                       :service-account "push@marigold.iam.gserviceaccount.com"}}})
 
-(def two-tenant-config
+(def one-tenant-config
   {:google {:tonotop {:project "marigold"
                       :topic   "projects/marigold/topics/isaac"
                       :oauth   {:client-id "cid-t" :account "yopp@tonotop.com"}
                       :push    {:endpoint        "https://isaac.example/google/pubsub"
-                                :service-account "push@marigold.iam.gserviceaccount.com"}}
-            :acme    {:project "acme-prod"
-                      :topic   "projects/acme-prod/topics/isaac"
-                      :oauth   {:client-id "cid-a" :account "isaac@acme.com"}
-                      :push    {:endpoint        "https://isaac.example/google/pubsub"
-                                :service-account "push@acme-prod.iam.gserviceaccount.com"}}}})
+                                :service-account "push@marigold.iam.gserviceaccount.com"}}}})
+
+(def two-tenant-config
+  (assoc-in one-tenant-config [:google :acme]
+            {:project "acme-prod"
+             :topic   "projects/acme-prod/topics/isaac"
+             :oauth   {:client-id "cid-a" :account "isaac@acme.com"}
+             :push    {:endpoint        "https://isaac.example/google/pubsub"
+                       :service-account "push@acme-prod.iam.gserviceaccount.com"}}))
 
 (def comm-config
-  {:comms {:gchat      {:google :tonotop :gchat/account "yopp@tonotop.com"}
-           :gchat-acme {:type :gchat :google :acme}
+  {:comms {:gchat      {:gchat/google :tonotop :gchat/account "yopp@tonotop.com"}
+           :gchat-acme {:type :gchat :gchat/google :acme}
            :gmail      {:gmail/account "yopp@tonotop.com"}
            :discord    {:type :discord}}})
 
@@ -32,99 +35,99 @@
 
 (describe "isaac.google.tenants"
 
-  (context "a flat config is the :default tenant"
+  (context "one shape: a map of organization id to config (isaac-okfj)"
 
-    (it "reads the flat map as one tenant"
-      (should= {:default (:google flat-config)} (sut/tenants flat-config)))
-
-    (it "lists :default"
-      (should= [:default] (sut/ids flat-config)))
-
-    (it "hands back the flat map for :default"
-      (should= (:google flat-config) (sut/tenant-config flat-config :default)))
-
-    (it "keeps the flat config path so existing config refs resolve"
-      (should= [:google] (sut/config-path flat-config :default)))
-
-    (it "has no tenants when google is unconfigured"
-      (should= {} (sut/tenants {}))
-      (should= [] (sut/ids {})))
-
-    (it "keeps the flat path when nothing is configured at all, so error messages name google.oauth.client-id"
-      (should= [:google] (sut/config-path {} :default))
-      (should= [:google] (sut/config-path {:google {}} :default))))
-
-  (context "several tenants"
-
-    (it "lists every tenant"
+    (it "reads the declared organizations"
+      (should= (:google two-tenant-config) (sut/tenants two-tenant-config))
       (should= [:acme :tonotop] (sut/ids two-tenant-config)))
 
-    (it "hands back one tenant's complete set"
+    (it "reads one organization the same way it reads several"
+      (should= (:google one-tenant-config) (sut/tenants one-tenant-config))
+      (should= [:tonotop] (sut/ids one-tenant-config)))
+
+    ;; The flat map isaac-1zkz accepted is not a second shape: :oauth and :push
+    ;; are maps, so reinterpreting would silently invent organizations named
+    ;; :oauth and :push. The schema reports it instead.
+    (it "reads a flat config as no organizations at all"
+      (should= {} (sut/tenants flat-config))
+      (should= [] (sut/ids flat-config))
+      (should= {} (sut/tenants {:google {:oauth {:client-id "cid"}}}))
+      (should-not (sut/organizations? (:google flat-config))))
+
+    (it "knows the one shape when it sees it"
+      (should (sut/organizations? (:google two-tenant-config)))
+      (should (sut/organizations? (:google one-tenant-config))))
+
+    (it "has no organizations when google is unconfigured or not a map"
+      (should= {} (sut/tenants {}))
+      (should= {} (sut/tenants {:google {}}))
+      (should= {} (sut/tenants {:google "nonsense"}))
+      (should= [] (sut/ids {})))
+
+    (it "hands back one organization's complete set"
       (should= "acme-prod" (:project (sut/tenant-config two-tenant-config :acme)))
       (should= "cid-a" (get-in (sut/tenant-config two-tenant-config :acme) [:oauth :client-id])))
 
-    (it "names the tenant in the config path"
-      (should= [:google :acme] (sut/config-path two-tenant-config :acme)))
+    (it "has no config for an organization nobody declared"
+      (should-be-nil (sut/tenant-config two-tenant-config :nobody)))
 
-    (it "has no config for a tenant nobody declared"
-      (should-be-nil (sut/tenant-config two-tenant-config :nobody))))
+    (it "always names the organization in the config path"
+      (should= [:google :acme] (sut/config-path two-tenant-config :acme))
+      (should= [:google :tonotop] (sut/config-path one-tenant-config :tonotop))))
 
-  (context "which tenant am I acting as"
+  (context "which organization am I acting as"
 
-    (it "an explicit tenant wins"
+    (it "an explicit organization wins"
       (should= :acme (sut/resolve-id two-tenant-config :acme)))
 
     (it "the dynamic binding is next"
       (binding [sut/*tenant* :acme]
         (should= :acme (sut/resolve-id two-tenant-config nil))))
 
-    (it "a lone tenant needs no naming"
-      (should= :default (sut/resolve-id flat-config nil))
-      (should= :tonotop (sut/resolve-id (update two-tenant-config :google dissoc :acme) nil)))
+    (it "a lone organization needs no naming"
+      (should= :tonotop (sut/resolve-id one-tenant-config nil)))
 
-    (it "falls back to :default when several are configured and none is named"
-      (should= :default (sut/resolve-id two-tenant-config nil))))
+    (it "names no organization when several are configured and none is named"
+      (should-be-nil (sut/resolve-id two-tenant-config nil)))
 
-  (context "tokens are stored per tenant"
+    (it "names no organization when none is configured"
+      (should-be-nil (sut/resolve-id {} nil))
+      (should-be-nil (sut/resolve-id flat-config nil))))
 
-    (it "keeps the plain google provider for the default tenant"
-      (should= "google" (sut/auth-provider :default))
-      (should= "google" (sut/auth-provider nil)))
+  (context "tokens are stored per organization"
 
-    (it "stores a named tenant under google/<tenant>"
-      (should= "google/acme" (sut/auth-provider :acme))))
+    (it "stores every organization under google/<id>"
+      (should= "google/acme" (sut/auth-provider :acme))
+      (should= "google/tonotop" (sut/auth-provider :tonotop)))
 
-  (context "which tenant a push came from"
+    (it "has no provider key for no organization"
+      (should-be-nil (sut/auth-provider nil))))
 
-    (it "reads the tenant off the subscription's project"
+  (context "which organization a push came from"
+
+    (it "reads the organization off the subscription's project"
       (should= :acme (sut/tenant-for-subscription two-tenant-config
                                                   "projects/acme-prod/subscriptions/isaac"))
       (should= :tonotop (sut/tenant-for-subscription two-tenant-config
                                                      "projects/marigold/subscriptions/isaac")))
 
-    (it "reads a flat config's subscription as :default"
-      (should= :default (sut/tenant-for-subscription flat-config
-                                                     "projects/marigold/subscriptions/isaac")))
-
-    (it "knows no tenant for a project nobody configured"
+    (it "knows no organization for a project nobody configured"
       (should-be-nil (sut/tenant-for-subscription two-tenant-config
                                                   "projects/impostor/subscriptions/isaac"))
       (should-be-nil (sut/tenant-for-subscription two-tenant-config nil))))
 
-  (context "which tenant a door principal speaks for"
-
-    (it "reads a plain :google-pubsub as the default tenant"
-      (should= :default (sut/principal-tenant :google-pubsub)))
+  (context "which organization a door principal speaks for"
 
     (it "reads :google-pubsub/acme as acme"
       (should= :acme (sut/principal-tenant :google-pubsub/acme)))
 
-    (it "knows nothing from no principal"
+    (it "knows nothing from a principal that names no organization"
+      (should-be-nil (sut/principal-tenant :google-pubsub))
       (should-be-nil (sut/principal-tenant nil))))
 
-  (context "the tenant a push belongs to"
+  (context "the organization a push belongs to"
 
-    (it "takes the tenant from the subscription's project"
+    (it "takes the organization from the subscription's project"
       (should= {:tenant :acme}
                (sut/tenant-of-push two-tenant-config
                                    {:subscription "projects/acme-prod/subscriptions/isaac"}
@@ -133,27 +136,31 @@
     ;; Acme's service account signed the token, but the push arrived on
     ;; tonotop's subscription. One of the two is lying; keep nothing.
     (it "refuses a push whose subscription and service account disagree"
-      (should= {:refused         :tenant-mismatch
-                :tenant          :tonotop
+      (should= {:refused          :tenant-mismatch
+                :tenant           :tonotop
                 :principal-tenant :acme}
                (sut/tenant-of-push two-tenant-config
                                    {:subscription "projects/marigold/subscriptions/isaac"}
                                    :google-pubsub/acme)))
 
     ;; A host that never configured :project still has a working door.
-    (it "falls back to the principal's tenant when no configured project owns the subscription"
+    (it "falls back to the principal's organization when no configured project owns the subscription"
       (should= {:tenant :acme}
                (sut/tenant-of-push two-tenant-config
                                    {:subscription "projects/impostor/subscriptions/isaac"}
                                    :google-pubsub/acme)))
 
-    (it "reads a push with no subscription as the principal's tenant"
-      (should= {:tenant :default}
-               (sut/tenant-of-push flat-config {} :google-pubsub)))
+    (it "reads a push with no subscription as the principal's organization"
+      (should= {:tenant :tonotop}
+               (sut/tenant-of-push one-tenant-config {} :google-pubsub/tonotop)))
 
-    (it "reads an unauthenticated push as the default tenant"
-      (should= {:tenant :default}
-               (sut/tenant-of-push flat-config {} nil))))
+    (it "reads an unauthenticated push as the only organization configured"
+      (should= {:tenant :tonotop}
+               (sut/tenant-of-push one-tenant-config {} nil)))
+
+    (it "names no organization for an unauthenticated push on a host serving several"
+      (should= {:tenant nil}
+               (sut/tenant-of-push two-tenant-config {} nil))))
 
   (context "a comm speaks for one organization"
 
@@ -163,33 +170,19 @@
       (should= [] (sut/comms comm-config :imessage)))
 
     (it "a comm speaks for the organization it names"
-      (should= :tonotop (sut/of-comm two-tenant-config {:google :tonotop}))
+      (should= :acme (sut/of-comm two-tenant-config {:gchat/google "acme"}))
+      (should= :tonotop (sut/of-comm two-tenant-config {:gmail/google "tonotop"})))
+
+    (it "still reads a bare :google, for configs written before the rename"
       (should= :acme (sut/of-comm two-tenant-config {:google "acme"})))
 
     (it "a comm naming none speaks for the only organization configured"
-      (should= :default (sut/of-comm flat-config {}))
-      (should= :acme (sut/of-comm {:google {:acme {:project "acme-prod"}}} {})))
+      (should= :tonotop (sut/of-comm one-tenant-config {})))
 
-    (it "a comm naming none where several are configured speaks for the default"
-      (should= :default (sut/of-comm two-tenant-config {})))
+    (it "a comm naming none names no organization where several are configured"
+      (should-be-nil (sut/of-comm two-tenant-config {})))
 
     (it "only the comms of one organization"
       (should= [:gchat-acme] (mapv key (sut/comms-for tenanted-comms :gchat :acme)))
       (should= [:gchat] (mapv key (sut/comms-for tenanted-comms :gchat :tonotop)))
-      (should= [] (sut/comms-for tenanted-comms :gmail :acme))))
-  
-  (context "the key a comm names its organization with (isaac-1zkz follow-up)"
-
-    (it "reads the comm kind's own namespaced key"
-      (let [cfg {:google {:tonotop {:project "p1"} :acme {:project "p2"}}}]
-        (should= :acme (sut/of-comm cfg {:gchat/google "acme"}))
-        (should= :tonotop (sut/of-comm cfg {:gmail/google "tonotop"}))))
-
-    (it "still reads a bare :google, for configs written before the rename"
-      (let [cfg {:google {:tonotop {:project "p1"} :acme {:project "p2"}}}]
-        (should= :acme (sut/of-comm cfg {:google "acme"}))))
-
-    (it "falls back to the only organization when a comm names none"
-      (should= :default (sut/of-comm {:google {:project "p"}} {})))
-    )
-)
+      (should= [] (sut/comms-for tenanted-comms :gmail :acme)))))

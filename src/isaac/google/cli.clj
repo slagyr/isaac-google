@@ -1,11 +1,11 @@
 (ns isaac.google.cli
   "`isaac google login` and `isaac google status`.
 
-   Both are per organization: a tenant has its own OAuth client and its own
+   Both are per organization: each has its own OAuth client and its own
    Google user, so its tokens are stored under its own provider key and
-   `--tenant` says which one is signing in. A single-organization host names
-   no tenant and nothing about it changes; a host with several sees its
-   status grouped by tenant (isaac-1zkz)."
+   `--tenant` says which one is signing in. A host with one organization may
+   leave `--tenant` off — there is only one to mean; a host with several sees
+   its status grouped by organization (isaac-okfj)."
   (:require
     [clojure.string :as str]
     [clojure.tools.cli :as tools-cli]
@@ -49,7 +49,7 @@
 
 (defn- tenant-id
   "Which organization this invocation is for: --tenant when given, else the
-   only one configured, else :default."
+   only one configured. nil when the host must say which."
   [config opts]
   (let [named (some-> (:tenant opts) str str/trim not-empty keyword)]
     (tenants/resolve-id config named)))
@@ -58,9 +58,10 @@
   (:oauth (tenants/tenant-config config id)))
 
 (defn- client-id-key
-  "Config key a human would set for this tenant's OAuth client."
+  "Config key a human would set for this organization's OAuth client."
   [config id]
-  (str/join "." (concat (map name (tenants/config-path config id)) ["oauth" "client-id"])))
+  (str/join "." (concat (map name (tenants/config-path config (or id :<organization>)))
+                        ["oauth" "client-id"])))
 
 (defn- missing-client-id? [oauth]
   (str/blank? (:client-id oauth)))
@@ -72,8 +73,7 @@
                                         :redirect-uri REDIRECT-URI
                                         :state        "isaac-google"})]
     (println (str "Open this URL, then paste the code with `isaac google login "
-                  (when-not (= tenants/DEFAULT id) (str "--tenant " (name id) " "))
-                  "--code <code>`:"))
+                  "--tenant " (name id) " --code <code>`:"))
     (println url)
     0))
 
@@ -120,20 +120,20 @@
     (catch clojure.lang.ExceptionInfo e
       (let [errors (:errors (ex-data e))
             msg    (or (some (fn [{:keys [key value]}]
-                               (when (and key (str/includes? (str key) "google.oauth.client-id"))
+                               (when (and key (str/includes? (str key) "oauth.client-id"))
                                  (str key " " value)))
                              errors)
                        (ex-message e)
-                       "google.oauth.client-id")]
+                       (client-id-key {} nil))]
         (binding [*out* *err*]
           (println msg)
-          (when (and (seq errors) (not (str/includes? msg "google.oauth.client-id")))
+          (when (and (seq errors) (not (str/includes? msg "oauth.client-id")))
             (doseq [{:keys [key value]} errors]
               (println (str key " " value)))))
         1))
     (catch Exception e
       (binding [*out* *err*]
-        (println (or (.getMessage e) "google.oauth.client-id")))
+        (println (or (.getMessage e) (client-id-key {} nil))))
       1)))
 
 (defn- parse-options [raw-args]
@@ -198,8 +198,10 @@
           config  (try (load-cfg opts) (catch Exception _ {}))
           state   (nexus/-with-nested-nexus {:fs fs* :root root}
                     (health/load-state root))
-          ids     (or (seq (tenants/ids config)) [tenants/DEFAULT])
+          ids     (tenants/ids config)
           several (> (count ids) 1)]
+      (when (empty? ids)
+        (println "No Google organization configured. Set google.<organization>.oauth.client-id."))
       (doseq [id ids]
         (when several
           (println (str "tenant: " (name id))))

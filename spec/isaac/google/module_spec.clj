@@ -5,7 +5,7 @@
     [isaac.google.config :as config]
     [isaac.google.module :as sut]
     [isaac.google.people :as people]
-    [speclj.core :refer [describe it should should=]]))
+    [speclj.core :refer [describe it should should-be-nil should=]]))
 
 (def manifest
   (edn/read-string (slurp "resources/isaac-manifest.edn")))
@@ -24,8 +24,14 @@
   (it "declares the google config table"
     (should= :map (get-in manifest [:isaac.config/schema :google :schema :type])))
 
-  (it "declares the google table flat-or-tenanted, exactly as the namespace defines it (isaac-1zkz)"
+  (it "declares the google table as organization id -> config, exactly as the namespace defines it (isaac-okfj)"
     (should= config/google-schema (get-in manifest [:isaac.config/schema :google :schema])))
+
+  ;; A trust rule's config refs are static paths that must name an
+  ;; organization; the manifest cannot know those ids, so the component
+  ;; registers every rule at start (isaac-okfj).
+  (it "declares no push-door identity of its own"
+    (should-be-nil (:isaac.http/identity manifest)))
 
   (it "declares the scopes berth and contributes openid plus the directory scope"
     (should= :seq (get-in manifest [:berths :isaac.google/scopes :schema :type]))

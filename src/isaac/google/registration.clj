@@ -137,8 +137,7 @@
     cfg))
 
 (defn- renew-hours
-  "How close to expiry this tenant renews. Each organization sets its own;
-   a flat config's value is the default tenant's."
+  "How close to expiry this organization renews. Each sets its own."
   [cfg id]
   (let [v (:renew-within-hours (tenants/tenant-config cfg id))]
     (cond
@@ -298,7 +297,7 @@
          _       (ensure-contributions!)
          cfg     (or config (load-cfg))
          entries (all)
-         ids     (or (seq (tenants/ids cfg)) [tenants/DEFAULT])
+         ids     (tenants/ids cfg)
          surveys (mapv #(survey-tenant now cfg entries %) ids)
          remotes (apply merge {} (map :remote surveys))
          keys    (vec (or (seq (mapcat :keys surveys))
