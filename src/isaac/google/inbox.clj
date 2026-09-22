@@ -89,3 +89,16 @@
 
 (defn mark-failed! [root message-id]
   (move! root message-id (failed-path root message-id)))
+
+(defn status
+  "Where message-id currently sits: :pending, :done, :failed, or :unknown (not
+   yet arrived, or arrived and never accepted). Lets a caller outside the
+   worker (the live smoke driver) poll a specific record's progress without
+   knowing the inbox's directory layout."
+  [root message-id]
+  (let [fs* (runtime-fs)]
+    (cond
+      (fs/exists? fs* (pending-path root message-id)) :pending
+      (fs/exists? fs* (done-path root message-id))    :done
+      (fs/exists? fs* (failed-path root message-id))  :failed
+      :else                                            :unknown)))
