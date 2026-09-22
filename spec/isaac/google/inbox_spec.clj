@@ -25,4 +25,21 @@
       (should= :new (sut/accept! "/test/isaac" event))
       (should= :duplicate (sut/accept! "/test/isaac" event))
       (should= 1 (count (sut/pending "/test/isaac")))))
+
+  (it "reports :unknown for a message-id it has never seen"
+    (should= :unknown (sut/status "/test/isaac" "never-seen")))
+
+  (it "reports :pending for an accepted, undrained record"
+    (sut/accept! "/test/isaac" {:message-id "m-6" :type "t" :data {}})
+    (should= :pending (sut/status "/test/isaac" "m-6")))
+
+  (it "reports :done once the worker marks it done"
+    (sut/accept! "/test/isaac" {:message-id "m-7" :type "t" :data {}})
+    (sut/mark-done! "/test/isaac" "m-7")
+    (should= :done (sut/status "/test/isaac" "m-7")))
+
+  (it "reports :failed once the worker marks it failed"
+    (sut/accept! "/test/isaac" {:message-id "m-8" :type "t" :data {}})
+    (sut/mark-failed! "/test/isaac" "m-8")
+    (should= :failed (sut/status "/test/isaac" "m-8")))
   )
