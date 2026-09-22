@@ -15,6 +15,7 @@
     [isaac.fs :as fs]
     [isaac.google.events :as events]
     [isaac.google.health :as health]
+    [isaac.google.heartbeat :as heartbeat]
     [isaac.google.tenants :as tenants]
     [isaac.logger :as log]
     [isaac.module.berths :as berths]
@@ -284,9 +285,24 @@
                      :key (:key action)
                      :reason (.getMessage e)))))))
 
+(defn- health-tenants
+  "Each organization with every key health should judge it by: the keys it
+   registers, plus every key the health state has heard from. The two are not
+   the same — one registration can cover a whole workspace (`spaces/-`) while
+   events arrive under concrete space ids, so judging registration keys alone
+   would be blind. Only a host with a single organization can say whose the
+   seen keys are (isaac-an14)."
+  [surveys state solo?]
+  (let [seen (vec (sort (keys (or (:last-event-at state) {}))))]
+    (mapv (fn [survey]
+            {:tenant (:tenant survey)
+             :keys   (vec (distinct (concat (:keys survey) (when solo? seen))))})
+          surveys)))
+
 (defn tick!
   "One reconcile pass on the caller thread, per configured tenant. Also
-   evaluates health, once, over every tenant's keys and remote state."
+   evaluates health, once, over every tenant's keys and remote state, and
+   sends each organization its synthetic heartbeat (isaac-an14)."
   ([] (tick! {}))
   ([{:keys [now root config] :as opts}]
    ;; :door-up? is read from opts explicitly — a destructured local of the
@@ -300,20 +316,21 @@
          ids     (tenants/ids cfg)
          surveys (mapv #(survey-tenant now cfg entries %) ids)
          remotes (apply merge {} (map :remote surveys))
-         keys    (vec (or (seq (mapcat :keys surveys))
-                          (sort (keys (or (:last-event-at (health/load-state root)) {})))))
          h-state (health/load-state root)
+         health-tenants (health-tenants surveys h-state (= 1 (count ids)))
          conditions (health/evaluate {:now      now
                                       :config   cfg
-                                      :keys     keys
+                                      :tenants  health-tenants
                                       :state    h-state
                                       :remote   remotes
                                       :door-up? up?})]
-     (health/log-conditions! conditions)
+     (health/log-conditions! conditions h-state)
      (doseq [survey surveys]
        (execute-tenant! root survey))
-     (health/apply! {:now        now
-                     :config     cfg
-                     :root       root
-                     :state      h-state
-                     :conditions conditions}))))
+     (let [applied (health/apply! {:now        now
+                                   :config     cfg
+                                   :root       root
+                                   :state      h-state
+                                   :conditions conditions})]
+       (heartbeat/send-all! {:root root :config cfg :now now :tenants ids})
+       applied))))

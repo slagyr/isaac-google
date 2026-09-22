@@ -3,6 +3,7 @@
     [isaac.fs :as fs]
     [isaac.google.events]
     [isaac.google.health]
+    [isaac.google.heartbeat]
     [isaac.google.registration :as sut]
     [isaac.google.tenants :as tenants]
     [isaac.nexus :as nexus]
@@ -170,5 +171,51 @@
                                                :expires-at "2026-09-19T06:00:00Z"}})
       (sut/tick! {:now now :root root :config @cfg :door-up? true})
       (should= [[:renew :tonotop "subscriptions/s-tonotop"]] @@calls))
+
+    ;; Health is judged per organization, so the tick hands it each
+    ;; organization with the keys that organization owns, and sends each one
+    ;; its heartbeat (isaac-an14).
+    (it "judges health per organization and sends each one a heartbeat"
+      (let [judged (atom nil)
+            beats  (atom nil)]
+        (sut/register! [:chat @entry])
+        (with-redefs [isaac.google.health/evaluate    (fn [opts] (reset! judged opts) [])
+                      isaac.google.heartbeat/send-all! (fn [opts] (reset! beats opts))]
+          (sut/tick! {:now now :root root :config @cfg :door-up? true}))
+        (should= [{:tenant :acme :keys ["spaces/acme"]}
+                  {:tenant :tonotop :keys ["spaces/tonotop"]}]
+                 (:tenants @judged))
+        (should= [:acme :tonotop] (:tenants @beats))
+        (should= now (:now @beats))))
+    )
+
+  ;; A registration can cover a whole workspace while events arrive under
+  ;; concrete space ids, so health is handed every key the state has heard
+  ;; from as well as the registered ones (isaac-an14, after isaac-ihuc).
+  (context "what health is judged by"
+
+    (with cfg {:google {:tonotop {:project "p-tonotop"}}})
+    (with entry {:create! (fn [_] {:name "subscriptions/s-all" :expireTime "2026-09-25T12:00:00Z"})
+                 :renew!  (fn [n] {:name n :expireTime "2026-09-25T12:00:00Z"})
+                 :key     (fn [] ["spaces/-"])
+                 :remote  (fn [] {"spaces/-" {:name "subscriptions/s-all"
+                                              :expires-at "2026-09-25T12:00:00Z"}})})
+
+    (around [example]
+      (sut/reset-registrations!)
+      (nexus/-with-nexus {:root root :fs (fs/mem-fs)}
+        (with-redefs [isaac.google.events/list-subscriptions! (fn [] {:subscriptions []})
+                      isaac.google.health/apply! (fn [_] nil)]
+          (example)))
+      (sut/reset-registrations!))
+
+    (it "hands health every key the state has heard from, not only the registered one"
+      (let [judged (atom nil)]
+        (sut/register! [:chat @entry])
+        (isaac.google.health/save-state! root {:last-event-at {"spaces/AAA" "2026-09-18T11:59:00Z"}})
+        (with-redefs [isaac.google.health/evaluate     (fn [opts] (reset! judged opts) [])
+                      isaac.google.heartbeat/send-all! (fn [_])]
+          (sut/tick! {:now now :root root :config @cfg :door-up? true}))
+        (should= [{:tenant :tonotop :keys ["spaces/-" "spaces/AAA"]}] (:tenants @judged))))
     )
   )

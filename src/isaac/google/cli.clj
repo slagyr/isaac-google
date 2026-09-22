@@ -8,7 +8,6 @@
    its status grouped by organization (isaac-okfj)."
   (:require
     [babashka.http-client :as http]
-    [cheshire.core :as json]
     [clojure.string :as str]
     [clojure.tools.cli :as tools-cli]
     [isaac.cli.api :as cli-api]
@@ -21,14 +20,14 @@
     [isaac.google.health :as health]
     [isaac.google.inbox :as inbox]
     [isaac.google.oauth :as oauth]
+    [isaac.google.pubsub :as pubsub]
     [isaac.google.registration :as registration]
     [isaac.google.scopes :as scopes]
     [isaac.google.smoke :as smoke]
     [isaac.google.tenants :as tenants]
     [isaac.llm.auth.store :as auth-store]
     [isaac.nexus :as nexus])
-  (:import (java.time Instant)
-           (java.util Base64)))
+  (:import (java.time Instant)))
 
 (def REDIRECT-URI "http://localhost:1/")
 
@@ -273,33 +272,18 @@
     (catch Exception e
       {:error (or (.getMessage e) (str e))})))
 
-(defn- b64 [^String s]
-  (.encodeToString (Base64/getEncoder) (.getBytes s "UTF-8")))
-
 (defn- publish-test-message!
   "Publishes one real message to the tenant's own configured Pub/Sub topic,
-   authenticated with its stored Google token. `ce-type` names it so an
-   inbox worker with no handler for it just leaves it be — decide-live-push
-   only needs it to *arrive* (isaac-mu1i). Requires the token to carry
+   authenticated with its stored Google token — the same publish the hourly
+   heartbeat makes (isaac.google.pubsub). `ce-type` names it so an inbox
+   worker with no handler for it just leaves it be — decide-live-push only
+   needs it to *arrive* (isaac-mu1i). Requires the token to carry
    pubsub.topics.publish on the topic, which the rollout's push-subscription
    grants do not give it by default; a FAIL here says so."
   [config id]
-  (let [topic (:topic (tenants/tenant-config config id))]
-    (if (str/blank? topic)
-      {:error (str "no google." (name id) ".topic configured")}
-      (try
-        (binding [tenants/*tenant* id]
-          (let [body   {:messages [{:data       (b64 (json/generate-string
-                                                        {:isaac-smoke true :at (str (Instant/now))}))
-                                    :attributes {"ce-type" "isaac.google.smoke/probe"}}]}
-                result (events/request! {:method :post
-                                         :url    (str "https://pubsub.googleapis.com/v1/" topic ":publish")
-                                         :body   body})]
-            (if (:error result)
-              {:error (or (:message result) (str (:status result)))}
-              {:message-id (first (:messageIds result))})))
-        (catch Exception e
-          {:error (or (.getMessage e) (str e))})))))
+  (pubsub/publish! config id
+                   {:data       {:isaac-smoke true :at (str (Instant/now))}
+                    :attributes {"ce-type" "isaac.google.smoke/probe"}}))
 
 (defn- await-arrival!
   "Polls inbox/*'s status for message-id until it leaves :unknown or the
@@ -351,10 +335,11 @@
           reg-results (if (seq reg-results)
                         reg-results
                         [(smoke/decide-registrations {:now now :keys [] :remote {}})])
-          all-keys   (vec (mapcat (fn [[_ {:keys [keys]}]] keys) per-tenant))
           all-remote (apply merge {} (map (fn [[_ {:keys [remote]}]] remote) per-tenant))
-          conditions (health/evaluate {:now now :config config :keys all-keys
-                                       :state state :remote all-remote :door-up? true})
+          conditions (health/evaluate {:now     now :config config
+                                       :tenants (mapv (fn [[id {:keys [keys]}]] {:tenant id :keys keys})
+                                                      per-tenant)
+                                       :state   state :remote all-remote :door-up? true})
           pending    (nexus/-with-nested-nexus {:fs fs* :root root} (inbox/pending root))
           inbox-result  (smoke/decide-inbox {:pending pending :threshold (:inbox-threshold opts)})
           silent-result (smoke/decide-silent {:conditions conditions :threshold (:silent-threshold opts)})

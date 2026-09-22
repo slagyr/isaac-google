@@ -12,6 +12,7 @@
     [isaac.google.events :as google-events]
     [isaac.google.handler :as google-handler]
     [isaac.google.health :as google-health]
+    [isaac.google.heartbeat :as google-heartbeat]
     [isaac.google.inbox :as google-inbox]
     [isaac.google.people :as google-people]
     [isaac.google.registration :as google-registration]
@@ -665,6 +666,35 @@
 
 (defgiven #"the last Google event for \"([^\"]+)\" was at \"([^\"]+)\""
   isaac.google-steps/last-google-event-was-at)
+
+(defn google-heartbeat-arrived
+  "What the door does when the tick's own synthetic message comes back: it
+   records the heartbeat, and nothing else — a heartbeat is not an event
+   (isaac-an14)."
+  [tenant ts]
+  (let [fs*  (feature-fs)
+        root (feature-root)]
+    (nexus/-with-nested-nexus {:fs fs* :root root}
+      (google-health/record-heartbeat! root (keyword tenant) ts))))
+
+(defn heartbeat-published-to
+  "Exactly one heartbeat left for this topic: a real Pub/Sub publish, marked
+   so the door can tell it from Chat traffic."
+  [topic]
+  (let [url  (str "https://pubsub.googleapis.com/v1/" topic ":publish")
+        reqs (or (g/get :outbound-http-requests) [])
+        hits (filter (fn [r]
+                       (and (= url (:url r))
+                            (= google-heartbeat/CE-TYPE
+                               (get-in r [:body :messages 0 :attributes "ce-type"]))))
+                     reqs)]
+    (g/should= 1 (count hits))))
+
+(defwhen #"a Google heartbeat for \"([^\"]+)\" arrived at \"([^\"]+)\""
+  isaac.google-steps/google-heartbeat-arrived)
+
+(defthen #"a Google heartbeat was published to \"([^\"]+)\""
+  isaac.google-steps/heartbeat-published-to)
 
 (defwhen "the test clock advances {n:int} milliseconds"
   isaac.google-steps/test-clock-advances)

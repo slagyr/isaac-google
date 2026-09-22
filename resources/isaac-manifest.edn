@@ -87,12 +87,27 @@
      :health
      {:name :google-health,
       :type :map,
-      :description "Silence threshold for Google health checks.",
+      :description
+      "Health thresholds for one Google organization: how long it may be silent, and its synthetic heartbeat.",
       :schema
       {:silent-after-hours
        {:type :int,
         :description
-        "Hours without an event before a registration is silent. Default 6."}}},
+        "Hours without any event from Google for this organization before it is silent. Default 6."},
+       :heartbeat
+       {:name :google-heartbeat,
+        :type :map,
+        :description
+        "Synthetic Pub/Sub heartbeat: the registration tick publishes one message to this organization's topic and expects it back at the push door.",
+        :schema
+        {:enabled
+         {:type :boolean,
+          :description
+          "Publish a heartbeat on every registration tick. Default true."},
+         :deadline-ms
+         {:type :int,
+          :description
+          "Milliseconds a published heartbeat has to reach the door before it counts as missed. Default 60000."}}}}},
      :oauth
      {:name :google-oauth,
       :type :map,

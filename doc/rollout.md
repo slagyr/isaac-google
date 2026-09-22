@@ -184,8 +184,9 @@ server on this host** — it starts nothing and drives no timer itself.
 Before pinning a version bump of `isaac.google`, `isaac.comm.gchat`, or
 `isaac.comm.gmail` on a live host (whichever host is carrying the
 release). Run it after the new modules are installed and the host has had at
-least one registration-tick interval (`google.tick-ms`, default 30s) to run
-unassisted. Gate the bump on every check passing.
+least one registration tick (hourly) to run unassisted — the tick is what
+registers, renews, judges health and publishes the heartbeat. Gate the bump on
+every check passing.
 
 ### How to run it
 
@@ -219,10 +220,15 @@ Each check prints one line, `PASS <check> — <evidence>` or `FAIL <check> —
 - **`inbox`** — fails if `inbox/pending` holds more records than
   `--inbox-threshold` (default 0). A scheduled, running worker drains it
   continuously; a worker that was never scheduled leaves it to grow forever.
-- **`silent`** — fails if more than `--silent-threshold` (default 0)
-  `:google/silent` conditions are currently firing, reading the exact
+- **`silent`** — fails if more than `--silent-threshold` (default 0) silence
+  conditions are currently firing, reading the exact
   `isaac.google.health/evaluate` decision the live registration tick already
-  makes on every pass.
+  makes on every pass. Two conditions count: an organization with no event
+  from Google inside its `silent-after-hours` (judged **per organization**,
+  not per space — a quiet space is normal — over every space that has ever
+  spoken plus its own heartbeat, not over the keys it happens to register),
+  and a synthetic heartbeat that was published but never came back through
+  the door.
 - **`live-push`** (only with `--send-live`) — publishes one real message to
   the tenant's configured Pub/Sub topic (authenticated with its stored
   Google token — no stub) and polls `inbox/*` until the message arrives
@@ -233,6 +239,40 @@ Each check prints one line, `PASS <check> — <evidence>` or `FAIL <check> —
   it by default — grant it to the Isaac account on the topic to use this
   flag, or run without it.
 
+### Health is a heartbeat (isaac-an14)
+
+The failure mode of this pipeline is silence: an expired subscription, a
+broken Pub/Sub binding and a dead Funnel all look exactly like nobody
+talking. So the hourly registration tick sends itself a real message —
+published to the organization's own topic, delivered by Google to the real
+door, verified like any other push — and expects it back within a deadline.
+
+```
+google.<organization>.health.silent-after-hours       6      ; hours with no event at all
+google.<organization>.health.heartbeat.enabled        true   ; default
+google.<organization>.health.heartbeat.deadline-ms    60000  ; default
+```
+
+- A heartbeat is recorded at the door as a heartbeat and nothing else: it is
+  never persisted to the inbox, never reaches a handler, never starts a turn,
+  and never appears in `isaac google status`'s last-event column — nobody
+  spoke. It does count as having *heard from* the organization, so an
+  organization whose heartbeats keep arriving is not reported silent just
+  because the humans are quiet; silence then means the pipeline delivered
+  nothing at all.
+- A heartbeat that does not arrive within `deadline-ms` is the condition
+  `:heartbeat-missed`; the next one that arrives clears it.
+- Every condition — silence, expiry, a missed heartbeat, an unreached door —
+  raises attention and logs **once on the transition**. `:google/silent` and
+  `:google/heartbeat-missed` fire when the condition appears;
+  `:google/health-cleared` when it goes. A condition that is merely still
+  present says nothing, so `server.log` shows at most one line per transition
+  per organization, not one per tick.
+- Publishing needs `pubsub.topics.publish` on the topic (the same grant
+  `--send-live` needs). Without it the tick logs `:google/heartbeat-failed`
+  hourly and records no heartbeat as in flight — a failed publish is never a
+  missed heartbeat.
+
 ### What each FAIL means
 
 | Check | A FAIL here means |
@@ -240,7 +280,7 @@ Each check prints one line, `PASS <check> — <evidence>` or `FAIL <check> —
 | `door` | The route isn't bound, isaac-http isn't loaded, or something answers something other than 401 for a bare POST. Check the process is actually running and listening on the expected port, or pass `--url` if the door isn't at `http://127.0.0.1:<http.port>/google/pubsub`. |
 | `registrations` | The registration tick either hasn't run, threw, or its create/renew calls didn't land on a real, listable Google resource. Check `server.log` for `:google/registration-failed`, and confirm `google.<tenant>.topic`/`oauth` are still valid. |
 | `inbox` | The inbox worker isn't scheduled or isn't draining. Confirm the server started the `:google/inbox` task (`berth/registration-summary` at boot) and that handlers aren't all crashing (check `inbox/failed`). |
-| `silent` | A registered key has gone quiet past its threshold — the subscription or watch may have lapsed without erroring, or nobody is posting to the space/mailbox. Cross-check `isaac google status`'s door/last-event columns. |
+| `silent` | Either this organization has seen no event at all past its threshold (subscription or watch lapsed without erroring, or genuinely nobody is talking), or its heartbeat never arrived — which is the pipeline itself: topic, subscription, Funnel, OIDC verification or the door. Cross-check `isaac google status`'s door/last-event columns and `server.log` for `:google/heartbeat-failed`. |
 | `live-push` | Either the publish call failed (commonly a permissions error — see the grant note above) or a genuinely accepted push never reached the inbox, which points at the OIDC verifier or the door handler itself rather than at Google. |
 
 ### Defect → check mapping

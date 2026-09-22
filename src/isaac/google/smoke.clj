@@ -122,21 +122,33 @@
                         (when-let [sample (first pending)]
                           (str "; e.g. message-id " (:message-id sample))))))))
 
-;; ---- silent: the watchdog is not itself silently over budget -----------
+;; ---- silent: the watchdog is not itself silently over budget ----------
+
+(defn- silent-evidence [condition]
+  (if (= :heartbeat-missed (:kind condition))
+    (str (name (:tenant condition)) " heartbeat missed — no push within "
+         (:deadline-ms condition) "ms")
+    (str (name (:tenant condition)) " no event for " (:silent-hours condition) "h")))
 
 (defn decide-silent
-  "PASS when the number of currently-firing `:google/silent` conditions is
-   at or below the threshold. `conditions` is `isaac.google.health/evaluate`'s
-   return value — the same pure decision the live registration tick already
-   makes on every pass, so this reads the exact signal the server alerts on
-   rather than a second, looser guess at staleness."
+  "PASS when the number of currently-firing silence conditions is at or below
+   the threshold. `conditions` is `isaac.google.health/evaluate`'s return
+   value — the same pure decision the live registration tick already makes on
+   every pass, so this reads the exact signal the server alerts on rather
+   than a second, looser guess at staleness.
+
+   Two conditions count: an organization with no event from Google inside its
+   `silent-after-hours` (per tenant, not per key — a quiet space is normal),
+   and a synthetic heartbeat that never came back through the door. The
+   second is the one that still speaks on a host nobody has messaged all day
+   (isaac-an14)."
   [{:keys [conditions threshold]}]
   (let [threshold (or threshold DEFAULT-SILENT-THRESHOLD)
-        silent    (filter #(= :silent (:kind %)) conditions)
+        silent    (filter #(#{:silent :heartbeat-missed} (:kind %)) conditions)
         n         (count silent)]
     (if (<= n threshold)
       (pass :silent (str n " silent condition(s), threshold " threshold))
-      (fail :silent (str/join "; " (map #(str (:key %) " no event for " (:silent-hours %) "h") silent))))))
+      (fail :silent (str/join "; " (map silent-evidence silent))))))
 
 ;; ---- live push (optional, --send-live): one real message published to
 ;;      the real Pub/Sub topic, proving the door, its OIDC verification

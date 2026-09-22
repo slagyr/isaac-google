@@ -22,12 +22,22 @@
                  :service-account {:type        :string
                                    :description "Push subscription service account email."}}})
 
+(def heartbeat-schema
+  {:name        :google-heartbeat
+   :type        :map
+   :description "Synthetic Pub/Sub heartbeat: the registration tick publishes one message to this organization's topic and expects it back at the push door."
+   :schema      {:enabled     {:type        :boolean
+                               :description "Publish a heartbeat on every registration tick. Default true."}
+                 :deadline-ms {:type        :int
+                               :description "Milliseconds a published heartbeat has to reach the door before it counts as missed. Default 60000."}}})
+
 (def health-schema
   {:name        :google-health
    :type        :map
-   :description "Silence threshold for Google health checks."
+   :description "Health thresholds for one Google organization: how long it may be silent, and its synthetic heartbeat."
    :schema      {:silent-after-hours {:type        :int
-                                      :description "Hours without an event before a registration is silent. Default 6."}}})
+                                      :description "Hours without any event from Google for this organization before it is silent. Default 6."}
+                 :heartbeat          heartbeat-schema}})
 
 (def tenant-fields
   "One Google organization's complete set: its project, topic, OAuth client

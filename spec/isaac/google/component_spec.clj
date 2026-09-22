@@ -10,6 +10,23 @@
 
 (describe "google runtime component"
 
+  ;; The registration tick is a slow watch: renewals are judged in hours and
+  ;; health is a heartbeat, so it runs hourly. The inbox worker keeps its own
+  ;; fast cadence — that one is draining real pushes (isaac-an14).
+  (it "ticks the registration timer hourly and the inbox worker in seconds"
+    (should= 3600000 sut/default-tick-ms)
+    (should= 2000 sut/default-inbox-ms))
+
+  (it "schedules each timer on its own cadence"
+    (let [sched  (scheduler/create {})
+          handle (nexus/-with-nexus {:scheduler sched}
+                   (sut/start! {}))
+          tasks  (into {} (map (juxt :id #(get-in % [:trigger :ms])) (scheduler/list-tasks sched)))]
+      (should= 3600000 (:google/registration tasks))
+      (should= 2000 (:google/inbox tasks))
+      (sut/stop! handle)
+      (scheduler/shutdown! sched)))
+
   (it "schedules both the registration timer and the inbox worker, and cancels both on stop"
     (let [sched  (scheduler/create {})
           handle (nexus/-with-nexus {:scheduler sched}

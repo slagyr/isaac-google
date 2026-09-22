@@ -37,6 +37,19 @@ Feature: Google Pub/Sub push door
     Then the skybeam handler received message "m-1"
     And the isaac file "google/inbox/done/m-1.edn" exists
 
+  Scenario: the tick's own heartbeat is recorded at the door and starts nothing
+    When Google pushes message "hb-1" of type "isaac.google/heartbeat" with data:
+      """
+      {"isaac-heartbeat": true, "tenant": "tonotop"}
+      """
+    Then the response status is 204
+    And the isaac file "google/health.edn" EDN contains:
+      | path                        | value |
+      | last-heartbeat-at.tonotop   | #*    |
+    And the isaac file "google/inbox/pending/hb-1.edn" does not exist
+    When the inbox worker ticks
+    Then the skybeam handler received no messages
+
   Scenario: anything but Google's token for this door is refused and nothing is kept
     Given the next push token has audience "https://elsewhere.example/hook"
     When Google pushes message "m-2" of type "google.workspace.chat.message.v1.created" with data:

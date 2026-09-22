@@ -23,6 +23,16 @@
   (it "account is optional"
     (should= nil (:validations (oauth-field :account))))
 
+  ;; Health is per organization: how long it may be quiet, and the heartbeat
+  ;; that proves the push pipeline when nobody is talking (isaac-an14).
+  (it "declares the health thresholds an organization sets"
+    (should= #{:silent-after-hours :heartbeat}
+             (set (keys (get-in sut/google-schema [:value-spec :schema :health :schema])))))
+
+  (it "declares the heartbeat's switch and deadline"
+    (should= :boolean (get-in sut/google-schema [:value-spec :schema :health :schema :heartbeat :schema :enabled :type]))
+    (should= :int (get-in sut/google-schema [:value-spec :schema :health :schema :heartbeat :schema :deadline-ms :type])))
+
   (it "declares push endpoint and service-account"
     (should= :string (get-in sut/google-schema [:value-spec :schema :push :schema :endpoint :type]))
     (should= :string (get-in sut/google-schema [:value-spec :schema :push :schema :service-account :type])))

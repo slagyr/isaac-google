@@ -91,26 +91,36 @@
       (should-contain "m-1" (:evidence result))))
   )
 
-(describe "google smoke — silent (:google/silent watchdog)"
+(describe "google smoke — silent (the per-tenant silence and heartbeat watchdogs)"
 
-  (it "passes when no silent conditions are firing"
+  (it "passes when nothing is firing"
     (should= {:check :silent :status :pass :evidence "0 silent condition(s), threshold 0"}
              (sut/decide-silent {:conditions [] :threshold 0})))
 
-  (it "passes when silent conditions are at the threshold"
+  (it "passes when conditions are at the threshold"
     (should= :pass (:status (sut/decide-silent
-                              {:conditions [{:kind :silent :key "spaces/ENG" :silent-hours 8}]
+                              {:conditions [{:kind :silent :tenant :tonotop :silent-hours 8}]
                                :threshold  1}))))
 
-  (it "fails and names each key past the threshold"
+  (it "fails and names each organization past the threshold"
     (let [result (sut/decide-silent
-                   {:conditions [{:kind :silent :key "spaces/ENG" :silent-hours 8}]
+                   {:conditions [{:kind :silent :tenant :tonotop :silent-hours 8}]
                     :threshold  0})]
       (should= :fail (:status result))
-      (should-contain "spaces/ENG" (:evidence result))
+      (should-contain "tonotop" (:evidence result))
       (should-contain "8h" (:evidence result))))
 
-  (it "ignores non-silent conditions"
+  ;; A missed heartbeat is the same watchdog: the pipeline is not delivering,
+  ;; whether or not anyone has been talking (isaac-an14).
+  (it "fails on a missed heartbeat"
+    (let [result (sut/decide-silent
+                   {:conditions [{:kind :heartbeat-missed :tenant :tonotop :deadline-ms 60000}]
+                    :threshold  0})]
+      (should= :fail (:status result))
+      (should-contain "tonotop" (:evidence result))
+      (should-contain "heartbeat" (:evidence result))))
+
+  (it "ignores conditions that are neither"
     (should= :pass (:status (sut/decide-silent
                               {:conditions [{:kind :expired :key "spaces/ENG"}]
                                :threshold  0}))))

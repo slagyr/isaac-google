@@ -15,6 +15,7 @@
     [isaac.config.loader :as loader]
     [isaac.fs :as fs]
     [isaac.google.health :as health]
+    [isaac.google.heartbeat :as heartbeat]
     [isaac.google.inbox :as inbox]
     [isaac.google.push :as push]
     [isaac.google.tenants :as tenants]
@@ -52,6 +53,18 @@
                            (as-> n (second (re-find #"^(spaces/[^/]+)" n)))))]
     (health/record-last-event! root k now)))
 
+(defn- accept-heartbeat!
+  "The tick's own synthetic message: record that it came back and stop. It
+   is not persisted, so no worker drains it, no handler sees it and no turn
+   starts; and it is not a last-event, so it never quiets the silence watch
+   it exists to complement (isaac-an14)."
+  [root tenant event now]
+  (when root
+    (health/record-door-hit! root now)
+    (health/record-heartbeat! root tenant now))
+  (log/debug :google/heartbeat-received :tenant tenant :message-id (:message-id event))
+  {:status 204 :headers {} :body ""})
+
 (defn- refuse-no-organization [event principal]
   (log/warn :google/no-organization
             :principal principal
@@ -84,12 +97,15 @@
       (let [tenant (:tenant decision)
             event  (assoc event :tenant tenant)
             now    (or (memory/now) (Instant/now))]
-        (when root
-          (record-health! root event now))
-        (inbox/accept! root event)
-        (log/info :google/push-received
-                  :principal (or principal :google-pubsub)
-                  :message-id (:message-id event)
-                  :tenant tenant
-                  :type (:type event))
-        {:status 204 :headers {} :body ""}))))
+        (if (heartbeat/heartbeat? event)
+          (accept-heartbeat! root tenant event now)
+          (do
+            (when root
+              (record-health! root event now))
+            (inbox/accept! root event)
+            (log/info :google/push-received
+                      :principal (or principal :google-pubsub)
+                      :message-id (:message-id event)
+                      :tenant tenant
+                      :type (:type event))
+            {:status 204 :headers {} :body ""}))))))

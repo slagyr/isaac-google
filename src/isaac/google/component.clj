@@ -20,7 +20,13 @@
     [isaac.nexus :as nexus]
     [isaac.scheduler.runtime :as scheduler]))
 
-(def default-tick-ms 30000)
+(def default-tick-ms
+  "The registration tick is hourly. What it does is slow work: renewals are
+   judged in hours (`renew-within-hours`, default 24, so an hourly tick has
+   two dozen chances before the shortest window closes) and health is a
+   heartbeat rather than a chatter monitor. A 30-second tick bought nothing
+   and cost a per-space warning every 30 seconds (isaac-an14)."
+  3600000)
 (def default-inbox-ms 2000)
 
 (defn- live-config []
