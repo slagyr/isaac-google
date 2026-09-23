@@ -4,6 +4,7 @@
     [isaac.config.loader :as loader]
     [isaac.google.component :as sut]
     [isaac.google.door :as door]
+    [isaac.google.registration]
     [isaac.nexus :as nexus]
     [isaac.scheduler.runtime :as scheduler]
     [speclj.core :refer :all]))
@@ -25,6 +26,25 @@
       (should= 3600000 (:google/registration tasks))
       (should= 2000 (:google/inbox tasks))
       (sut/stop! handle)
+      (scheduler/shutdown! sched)))
+
+  ;; An :interval trigger fires after a full period. A restart must not wait an
+  ;; hour to reconcile subscriptions and send the first heartbeat, so start!
+  ;; also queues one immediate tick (isaac-nsh1).
+  (it "runs the registration tick once at boot, ahead of the hourly interval"
+    (let [ticks  (atom 0)
+          sched  (scheduler/create {})
+          handle (with-redefs [isaac.google.registration/tick! (fn [_] (swap! ticks inc))]
+                   (nexus/-with-nexus {:scheduler sched}
+                     (sut/start! {})))
+          boot   (first (filter #(= :google/registration-boot (:id %)) (scheduler/list-tasks sched)))]
+      (should-not-be-nil boot)
+      (should= :delay (get-in boot [:trigger :kind]))
+      (with-redefs [isaac.google.registration/tick! (fn [_] (swap! ticks inc))]
+        ((:handler boot) {}))
+      (should= 1 @ticks)
+      (sut/stop! handle)
+      (should= #{} (set (map :id (scheduler/list-tasks sched))))
       (scheduler/shutdown! sched)))
 
   (it "schedules both the registration timer and the inbox worker, and cancels both on stop"
