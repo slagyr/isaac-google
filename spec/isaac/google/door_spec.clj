@@ -71,19 +71,19 @@
 
   (context "where Google sends the operator back (isaac-2abl)"
 
-    (it "hangs the callback off the host the push endpoint already publishes"
-      (should= "https://isaac.example/google/oauth/callback"
-               (sut/redirect-uri one-tenant-config :tonotop)))
+    ;; The callback is opt-in. A push endpoint says nothing about the OAuth
+    ;; client: a Desktop client cannot carry a redirect URI, so a host that
+    ;; publishes a door still pastes a code unless it states a redirect base.
+    (it "publishing a push endpoint alone keeps the paste-a-code login"
+      (should-be-nil (sut/redirect-uri one-tenant-config :tonotop)))
 
-    (it "prefers the redirect base an organization states outright"
+    (it "a stated redirect base selects the callback, trailing slash and all"
       (let [config (assoc-in one-tenant-config [:google :tonotop :oauth :redirect-base]
                              "https://isaac.tonotop.example/")]
         (should= "https://isaac.tonotop.example/google/oauth/callback"
                  (sut/redirect-uri config :tonotop))))
 
-    ;; No public base is the whole answer: a host nobody can reach from the
-    ;; internet keeps the paste-a-code login (isaac-2abl).
-    (it "has nowhere to send the operator without a push endpoint or a base"
+    (it "has nowhere to send the operator without a base"
       (should-be-nil (sut/redirect-uri {:google {:tonotop {:oauth {:client-id "cid"}}}} :tonotop))
       (should-be-nil (sut/redirect-uri {} nil))))
 

@@ -73,22 +73,16 @@
 
 ;; ---- the OAuth callback door --------------------------------------------
 
-(defn- origin
-  "The scheme and host of a URL, with its path dropped — an organization's
-   push endpoint is the one URL a host has already published and registered
-   with Google, so it says where the callback lives too."
-  [url]
-  (second (re-find #"^(https?://[^/]+)" (str url))))
-
 (defn public-base
-  "Where the internet reaches this Isaac for `id`: the redirect base that
-   organization states outright, else the origin of its push endpoint. nil
-   when the host publishes nothing."
+  "Where the login sends the operator back: the redirect base an organization
+   states outright (oauth.redirect-base), or nil. Deliberately NOT derived from
+   the push endpoint: only a Web-application OAuth client can carry a redirect
+   URI, and a host on a Desktop client must keep the paste-a-code login even
+   though it publishes a push door (Micah, 2026-09-23)."
   [config id]
   (let [tenant (tenants/tenant-config config id)]
-    (or (some-> (get-in tenant [:oauth :redirect-base])
-                str str/trim not-empty (str/replace #"/+$" ""))
-        (some-> (get-in tenant [:push :endpoint]) str str/trim not-empty origin))))
+    (some-> (get-in tenant [:oauth :redirect-base])
+            str str/trim not-empty (str/replace #"/+$" ""))))
 
 (defn redirect-uri
   "The redirect_uri `id`'s consent URL asks Google for, and the one the code

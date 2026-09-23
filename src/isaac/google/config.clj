@@ -13,7 +13,7 @@
                  :account       {:type        :string
                                  :description "Google account the tokens belong to (e.g. yopp@tonotop.com)."}
                  :redirect-base {:type        :string
-                                 :description "Public base URL the login's consent screen redirects back to, as https://<host> — the callback is <base>/google/oauth/callback and must be an Authorized redirect URI on the OAuth client. Defaults to the origin of push.endpoint; with neither, the login falls back to pasting a code with --code."}}})
+                                 :description "Public base URL the login redirects back to, as https://<host>; the callback is <base>/google/oauth/callback and must be an Authorized redirect URI on a Web-application OAuth client. Unset, the login pastes a code (works with a Desktop client)."}}})
 
 (def push-schema
   {:name        :google-push

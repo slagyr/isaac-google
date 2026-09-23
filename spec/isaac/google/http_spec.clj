@@ -134,7 +134,8 @@
 (def login-config
   {:google {:tonotop {:oauth {:client-id     "isaac-test.apps.googleusercontent.com"
                               :client-secret "shh"
-                              :account       "yopp@tonotop.com"}
+                              :account       "yopp@tonotop.com"
+                              :redirect-base "https://isaac.example"}
                       :push  {:endpoint "https://isaac.example/google/pubsub"}}}})
 
 (defn- callback-request [query]

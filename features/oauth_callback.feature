@@ -18,6 +18,7 @@ Feature: The login finishes at the Isaac host
       | google.tonotop.oauth.client-id     | isaac-test.apps.googleusercontent.com |
       | google.tonotop.oauth.client-secret | shh                                   |
       | google.tonotop.oauth.account       | yopp@tonotop.com                      |
+      | google.tonotop.oauth.redirect-base | https://isaac.example                 |
       | google.tonotop.push.endpoint       | https://isaac.example/google/pubsub   |
     And the Isaac server is started
     And the Google runtime component is started
