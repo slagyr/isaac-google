@@ -33,9 +33,10 @@
   (it "declares no push-door identity of its own"
     (should-be-nil (:isaac.http/identity manifest)))
 
-  (it "declares the scopes berth and contributes openid plus the directory scope"
+  (it "declares the scopes berth and contributes openid, the directory scope and pubsub"
     (should= :seq (get-in manifest [:berths :isaac.google/scopes :schema :type]))
-    (should= ["openid" people/DIRECTORY-SCOPE] (:isaac.google/scopes manifest)))
+    (should= ["openid" people/DIRECTORY-SCOPE "https://www.googleapis.com/auth/pubsub"]
+             (:isaac.google/scopes manifest)))
 
   (it "declares the registration berth"
     (should= :map (get-in manifest [:berths :isaac.google/registration :schema :type]))
