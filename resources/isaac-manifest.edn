@@ -1,5 +1,5 @@
 {:id          :isaac.google
- :version     "0.1.9"
+ :version     "0.1.10"
  :builtin?    true
  :factory     isaac.google.module/create-module
  :description "Shared Google Workspace plumbing for Isaac — OAuth for the Google user, the Pub/Sub push door and durable inbox, registrations and renewal, health. Knows nothing of Chat or Gmail."
@@ -30,7 +30,11 @@
 
  ;; directory.readonly lets isaac.google.people ask the Workspace directory for a
  ;; user's email: Chat never gives one for a human sender (isaac-8s6s).
- :isaac.google/scopes ["openid" "https://www.googleapis.com/auth/directory.readonly"]
+ ;; pubsub: the hourly heartbeat and `isaac google smoke --send-live` publish to
+ ;; the organization's own topic as the signed-in user (isaac-an14, isaac-mu1i).
+ :isaac.google/scopes ["openid"
+                       "https://www.googleapis.com/auth/directory.readonly"
+                       "https://www.googleapis.com/auth/pubsub"]
 
  ;; Who is this person? The agent asks Google with Isaac's own token, rather
  ;; than a crew shelling out to another CLI with its own grant (isaac-jqk2).
