@@ -33,11 +33,15 @@
   (or (loader/snapshot "google component") {}))
 
 (defn register-door!
-  "Register one push-door trust rule per configured organization. `config` and
-   `register!` default to live config and isaac-http's identity seam."
+  "Open this module's doors: one push-door trust rule per configured
+   organization, and the OAuth callback the consent redirect lands on.
+   `config` and `register!` default to live config and isaac-http's identity
+   seam."
   [config register!]
-  (let [cfg (or config (live-config))]
-    (door/register-trust-rules! cfg (or register! (door/registrar)))))
+  (let [cfg       (or config (live-config))
+        register! (or register! (door/registrar))]
+    (door/register-trust-rules! cfg register!)
+    (door/register-callback! cfg register!)))
 
 (defn start!
   [{:keys [tick-ms inbox-ms config register-identity!]

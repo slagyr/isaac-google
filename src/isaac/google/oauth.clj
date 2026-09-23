@@ -12,27 +12,36 @@
   (URLEncoder/encode (str s) "UTF-8"))
 
 (defn authorization-url
-  [{:keys [client-id scopes redirect-uri state]}]
+  "The consent URL. `:code-challenge` is the S256 challenge of the login's
+   PKCE verifier; without one the URL is the plain authorization-code flow
+   the paste-a-code login has always used."
+  [{:keys [client-id scopes redirect-uri state code-challenge]}]
   (let [scope-str (str/join " " scopes)
-        params    [["client_id" client-id]
-                   ["redirect_uri" redirect-uri]
-                   ["response_type" "code"]
-                   ["scope" scope-str]
-                   ["access_type" "offline"]
-                   ["prompt" "consent"]
-                   ["state" state]]]
+        params    (cond-> [["client_id" client-id]
+                           ["redirect_uri" redirect-uri]
+                           ["response_type" "code"]
+                           ["scope" scope-str]
+                           ["access_type" "offline"]
+                           ["prompt" "consent"]
+                           ["state" state]]
+                    code-challenge (conj ["code_challenge" code-challenge]
+                                         ["code_challenge_method" "S256"]))]
     (str AUTH-URL "?"
          (str/join "&" (map (fn [[k v]] (str k "=" (url-encode v))) params)))))
 
 (defn exchange-code!
-  [{:keys [client-id client-secret redirect-uri]} code]
+  "Trade the authorization code for tokens. `:code-verifier` is the PKCE
+   secret the login kept back; Google requires it when the consent URL
+   carried a challenge, and rejects it when it did not."
+  [{:keys [client-id client-secret redirect-uri code-verifier]} code]
   (llm-http/post-json! TOKEN-URL
                        {"Content-Type" "application/json"}
-                       {:grant_type    "authorization_code"
-                        :code          code
-                        :client_id     client-id
-                        :client_secret client-secret
-                        :redirect_uri  redirect-uri}))
+                       (cond-> {:grant_type    "authorization_code"
+                                :code          code
+                                :client_id     client-id
+                                :client_secret client-secret
+                                :redirect_uri  redirect-uri}
+                         code-verifier (assoc :code_verifier code-verifier))))
 
 (defn refresh!
   [{:keys [client-id client-secret]} refresh-token]

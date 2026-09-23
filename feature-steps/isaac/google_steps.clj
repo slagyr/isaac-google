@@ -8,26 +8,32 @@
     [isaac.fs :as fs]
     [cheshire.core :as json]
     [isaac.config.loader :as loader]
+    [isaac.google.cli :as google-cli]
     [isaac.google.component :as google-component]
+    [isaac.google.door :as door]
     [isaac.google.events :as google-events]
     [isaac.google.handler :as google-handler]
     [isaac.google.health :as google-health]
     [isaac.google.heartbeat :as google-heartbeat]
     [isaac.google.inbox :as google-inbox]
+    [isaac.google.logins :as logins]
     [isaac.google.people :as google-people]
     [isaac.google.registration :as google-registration]
     [isaac.google.tenants :as tenants]
     [isaac.google.token :as google-token]
     [isaac.google.worker :as google-worker]
+    [isaac.http.http :as http]
     [isaac.http.oidc :as oidc]
     [isaac.http.oidc-fixture :as oidc-fixture]
     [isaac.logger :as log]
+    [isaac.main :as main]
     [isaac.tool.memory :as memory]
     [isaac.llm.auth.store :as auth-store]
     [isaac.llm.http :as llm-http]
     [isaac.module.discovery :as discovery]
     [isaac.nexus :as nexus])
   (:import
+    (java.net URLDecoder URLEncoder)
     (java.util Base64)))
 
 (helper! isaac.google-steps)
@@ -109,8 +115,14 @@
   (fn [thunk]
     (when-not (g/get :google-http-calls)
       (g/assoc! :google-http-calls (atom [])))
-    (with-redefs [llm-http/post-json! stub-post-json!]
-      (thunk))))
+    ;; `isaac google login` waits at the terminal for the callback. Two
+    ;; seconds and ten minutes are the operator's cadence, not a scenario's:
+    ;; a feature drives the browser itself, and leaving a run polling after
+    ;; its scenario ended would outlive the stub it is holding open.
+    (binding [google-cli/*poll-interval-ms* 25
+              google-cli/*poll-timeout-ms*  5000]
+      (with-redefs [llm-http/post-json! stub-post-json!]
+        (thunk)))))
 
 (fcli/register-isaac-run-postflight!
   (fn []
@@ -814,3 +826,130 @@
 
 (defthen #"exactly one warning named the missing \"([^\"]+)\" scope"
   isaac.google-steps/one-scope-warning)
+
+;; region ----- the login that finishes at this host (isaac-2abl) -----
+;;
+;; The CLI runs in the background because the command deliberately outlives
+;; the consent screen: it prints the URL, waits for the callback, and only
+;; then says how it went. The scenario plays the browser in between.
+
+(defn login-left-waiting
+  "`isaac google login` on a daemon thread: the command deliberately outlives
+   the consent screen, so the scenario plays the browser while it waits. A
+   daemon thread, because a lingering non-daemon one would hold the whole
+   suite's JVM open after the last scenario."
+  [args]
+  (let [out  (java.io.StringWriter.)
+        err  (java.io.StringWriter.)
+        argv (vec (remove str/blank? (str/split (str/trim (str args)) #"\s+")))
+        root (g/get :root)]
+    (g/assoc! :live-output-writer out)
+    (g/assoc! :live-error-writer err)
+    (g/assoc! :google-http-calls (atom []))
+    ;; bound-fn, not a bare fn: gherclj's scenario state rides a dynamic var,
+    ;; and a raw thread would carry none of this scenario's bindings with it.
+    (doto (Thread.
+            ^Runnable
+            (bound-fn []
+              (binding [*out*                        out
+                        *err*                        err
+                        main/*extra-opts*            (cond-> {} root (assoc :root root))
+                        google-cli/*poll-interval-ms* 25
+                        google-cli/*poll-timeout-ms*  5000]
+                (with-redefs [llm-http/post-json! stub-post-json!]
+                  (g/assoc! :exit-code (main/run argv))))))
+      (.setDaemon true)
+      (.start))))
+
+(defn- consent-url
+  "The authorization URL `isaac google login` printed, once it has printed it."
+  []
+  (let [text (fcli/await-text fcli/current-output
+                              #(str/includes? % "accounts.google.com/o/oauth2/v2/auth"))]
+    (some #(when (str/starts-with? % "https://accounts.google.com/") (str/trim %))
+          (str/split-lines (or text "")))))
+
+(defn- consent-param [name]
+  (when-let [url (consent-url)]
+    (some (fn [pair]
+            (let [[k v] (str/split pair #"=" 2)]
+              (when (= name k) (URLDecoder/decode (or v "") "UTF-8"))))
+          (str/split (or (second (str/split url #"\?" 2)) "") #"&"))))
+
+(defn consent-redirects-to [uri]
+  (g/should= uri (consent-param "redirect_uri")))
+
+(defn consent-carries-pkce []
+  (g/should= "S256" (consent-param "code_challenge_method"))
+  (g/should (seq (consent-param "code_challenge"))))
+
+(defn pending-login-recorded [tenant]
+  (let [state  (consent-param "state")
+        record (with-feature-fs #(logins/pending (feature-root) state))]
+    (g/should (logins/state? state))
+    (g/should-not-be-nil record)
+    (g/should= (keyword tenant) (:tenant record))
+    (g/should (seq (:code-verifier record)))
+    (g/should (seq (:created-at record)))))
+
+(defn login-started-minutes-ago [tenant state minutes]
+  (let [minutes (if (string? minutes) (parse-long minutes) minutes)]
+    (with-feature-fs
+      #(logins/save! (feature-root) state
+                     {:tenant        (keyword tenant)
+                      :scopes        ["openid"]
+                      :code-verifier "v-cold"
+                      :created-at    (str (.minus (java.time.Instant/now)
+                                                  (java.time.Duration/ofMinutes minutes)))}))))
+
+(defn- callback-redirect!
+  "The operator's browser arriving at the callback: a GET with no credentials
+   of any kind, its state and code in the query. isaac-http's own GET step
+   hands the whole path to :uri, which is not how a query reaches a ring
+   handler, so this scenario builds the request Google would send."
+  [state code]
+  (let [opts    (g/get :server-handler-opts)
+        request {:request-method :get
+                 :uri            door/CALLBACK-PATH
+                 :query-string   (str "state=" (URLEncoder/encode (str state) "UTF-8")
+                                      "&code=" (URLEncoder/encode (str code) "UTF-8"))
+                 :headers        {}
+                 :remote-addr    "203.0.113.7"}]
+    (g/assoc! :http-response
+              (nexus/-with-nested-nexus {:fs (feature-fs) :root (:root opts)}
+                ((http/create-handler opts) request)))))
+
+(defn callback-with-recorded-state [code]
+  (callback-redirect! (consent-param "state") code))
+
+(defn callback-with-state [state code]
+  (callback-redirect! state code))
+
+(defn response-body-contains [text]
+  (g/should (str/includes? (str (:body (g/get :http-response))) text)))
+
+(defwhen #"the operator starts \"([^\"]+)\" and leaves it waiting"
+  isaac.google-steps/login-left-waiting)
+
+(defthen #"the consent URL sends the browser back to \"([^\"]+)\""
+  isaac.google-steps/consent-redirects-to)
+
+(defthen "the consent URL carries a PKCE challenge"
+  isaac.google-steps/consent-carries-pkce)
+
+(defthen #"a pending login is recorded for organization \"([^\"]+)\""
+  isaac.google-steps/pending-login-recorded)
+
+(defgiven #"a login for organization \"([^\"]+)\" under state \"([^\"]+)\" started (\d+) minutes ago"
+  isaac.google-steps/login-started-minutes-ago)
+
+(defwhen #"Google redirects to the callback with the recorded state and code \"([^\"]+)\""
+  isaac.google-steps/callback-with-recorded-state)
+
+(defwhen #"Google redirects to the callback with state \"([^\"]+)\" and code \"([^\"]+)\""
+  isaac.google-steps/callback-with-state)
+
+(defthen "the response body contains {text:string}"
+  isaac.google-steps/response-body-contains)
+
+;; endregion

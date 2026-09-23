@@ -1,18 +1,31 @@
 (ns isaac.google.door
-  "The push door's trust rules — one per Google organization.
+  "The doors Google knocks on: the Pub/Sub push door, and the OAuth callback
+   the operator's browser lands on at the end of a login.
 
    isaac-http verifies Google's OIDC token against a data-shaped rule whose
    :audience and :claims may be config refs (static paths into live config).
    One rule therefore proves one organization, so a host gets one rule per
    configured organization, each pointed at that organization's own endpoint
    and push service account, granting a principal named after it. There is no
-   unnamed rule, because there is no unnamed organization (isaac-okfj)."
+   unnamed rule, because there is no unnamed organization (isaac-okfj).
+
+   The callback door is the other kind: a consent redirect arrives from the
+   operator's own browser carrying no credentials at all, so it cannot be
+   authenticated — it can only be scoped. A code verifier opens it for GET on
+   that one path and grants one scope the callback route alone requires; the
+   handshake itself is proved by the state nonce and the PKCE verifier the
+   pending login holds, not by the request (isaac-2abl)."
   (:require
+    [clojure.string :as str]
     [isaac.google.tenants :as tenants]))
 
 (def ISSUER "https://accounts.google.com")
 (def JWKS "https://www.googleapis.com/oauth2/v3/certs")
 (def SCOPE :google/push)
+
+(def CALLBACK-PATH "/google/oauth/callback")
+(def CALLBACK-SCOPE :google/oauth-callback)
+(def CALLBACK-PRINCIPAL :google/oauth-callback)
 
 (defn principal-name
   "The principal an organization's rule grants, always named after it."
@@ -57,3 +70,51 @@
      (doseq [entry (trust-rules config)]
        (register! entry))
      (count (trust-rules config)))))
+
+;; ---- the OAuth callback door --------------------------------------------
+
+(defn- origin
+  "The scheme and host of a URL, with its path dropped — an organization's
+   push endpoint is the one URL a host has already published and registered
+   with Google, so it says where the callback lives too."
+  [url]
+  (second (re-find #"^(https?://[^/]+)" (str url))))
+
+(defn public-base
+  "Where the internet reaches this Isaac for `id`: the redirect base that
+   organization states outright, else the origin of its push endpoint. nil
+   when the host publishes nothing."
+  [config id]
+  (let [tenant (tenants/tenant-config config id)]
+    (or (some-> (get-in tenant [:oauth :redirect-base])
+                str str/trim not-empty (str/replace #"/+$" ""))
+        (some-> (get-in tenant [:push :endpoint]) str str/trim not-empty origin))))
+
+(defn redirect-uri
+  "The redirect_uri `id`'s consent URL asks Google for, and the one the code
+   exchange must repeat. nil when this host has no public base, which is what
+   keeps the paste-a-code login."
+  [config id]
+  (when-let [base (public-base config id)]
+    (str base CALLBACK-PATH)))
+
+(def callback-verifier
+  "isaac-http code verifier for the consent redirect. It grants one principal,
+   on one method and path, with one scope — the scope the callback route
+   requires and nothing else in Isaac accepts."
+  (with-meta
+    (fn [request]
+      (when (and (= :get (:request-method request))
+                 (= CALLBACK-PATH (:uri request)))
+        {:name CALLBACK-PRINCIPAL :scopes #{CALLBACK-SCOPE}}))
+    {:name CALLBACK-PRINCIPAL}))
+
+(defn register-callback!
+  "Open the callback door on a host that serves at least one Google
+   organization. A host with none has no login to finish, and registering a
+   verifier would turn isaac-http's auth on for everything it serves."
+  ([config] (register-callback! config (registrar)))
+  ([config register!]
+   (when (and register! (seq (tenants/ids config)))
+     (register! callback-verifier)
+     1)))

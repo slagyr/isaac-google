@@ -23,6 +23,14 @@
   (it "account is optional"
     (should= nil (:validations (oauth-field :account))))
 
+  ;; Most hosts already publish a push endpoint, and the callback hangs off
+  ;; the same origin; redirect-base is for the host whose OAuth callback and
+  ;; Pub/Sub door are not the same public name (isaac-2abl).
+  (it "redirect-base is an optional string, documented as the login's public base"
+    (should= :string (:type (oauth-field :redirect-base)))
+    (should= nil (:validations (oauth-field :redirect-base)))
+    (should-contain "/google/oauth/callback" (:description (oauth-field :redirect-base))))
+
   ;; Health is per organization: how long it may be quiet, and the heartbeat
   ;; that proves the push pipeline when nobody is talking (isaac-an14).
   (it "declares the health thresholds an organization sets"

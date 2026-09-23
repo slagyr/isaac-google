@@ -23,6 +23,24 @@
         (should-contain "access_type=offline" url)
         (should-contain "openid" url)
         (should-contain "chat.messages.readonly" url)))
+
+    ;; PKCE binds the code to the login that asked for it, so a code seen in
+    ;; transit is useless without the verifier only that login holds.
+    (it "carries the PKCE challenge when the login made one"
+      (let [url (sut/authorization-url {:client-id      "cid"
+                                        :scopes         ["openid"]
+                                        :redirect-uri   "https://isaac.example/google/oauth/callback"
+                                        :state          "st-1"
+                                        :code-challenge "chal-1"})]
+        (should-contain "code_challenge=chal-1" url)
+        (should-contain "code_challenge_method=S256" url)))
+
+    (it "asks for no challenge when the login has no verifier to prove"
+      (let [url (sut/authorization-url {:client-id    "cid"
+                                        :scopes       ["openid"]
+                                        :redirect-uri "http://localhost:1/"
+                                        :state        "isaac-google"})]
+        (should-not (str/includes? url "code_challenge"))))
     )
 
   (context "code exchange"
@@ -47,6 +65,18 @@
                       :client_secret "shh"
                       :redirect_uri  "http://localhost:9/"}
                      (:body @captured))))))
+
+    (it "proves the PKCE verifier when the login kept one"
+      (let [captured (atom nil)]
+        (with-redefs [llm-http/post-json! (fn [_url _headers body & _]
+                                            (reset! captured body)
+                                            {:access_token "at-1"})]
+          (sut/exchange-code! {:client-id     "cid"
+                               :client-secret "shh"
+                               :redirect-uri  "https://isaac.example/google/oauth/callback"
+                               :code-verifier "v-1"}
+                              "4/0AbCd")
+          (should= "v-1" (:code_verifier @captured)))))
     )
 
   (context "refresh"

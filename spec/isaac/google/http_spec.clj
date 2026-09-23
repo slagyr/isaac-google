@@ -6,6 +6,9 @@
     [isaac.google.heartbeat :as heartbeat]
     [isaac.google.http :as sut]
     [isaac.google.inbox :as inbox]
+    [isaac.google.logins :as logins]
+    [isaac.llm.auth.store :as auth-store]
+    [isaac.llm.http :as llm-http]
     [isaac.logger :as log]
     [isaac.nexus :as nexus]
     [isaac.tool.memory :as memory]
@@ -124,4 +127,135 @@
       (let [state (health/load-state "/test/isaac")]
         (should= nil (:last-event-at state))
         (should= "2026-09-18T12:00:00Z" (:door-last-hit state)))))
+  )
+
+;; ---------------------------------------------------------------------------
+
+(def login-config
+  {:google {:tonotop {:oauth {:client-id     "isaac-test.apps.googleusercontent.com"
+                              :client-secret "shh"
+                              :account       "yopp@tonotop.com"}
+                      :push  {:endpoint "https://isaac.example/google/pubsub"}}}})
+
+(defn- callback-request [query]
+  {:request-method :get
+   :uri            "/google/oauth/callback"
+   :query-string   query
+   :isaac/config   login-config})
+
+(defn- pending!
+  ([state] (pending! state "2026-09-18T12:00:00Z"))
+  ([state created-at]
+   (logins/save! "/test/isaac" state {:tenant        :tonotop
+                                      :scopes        ["openid"]
+                                      :code-verifier "v-1"
+                                      :created-at    created-at})))
+
+(defn- stored-tokens []
+  (auth-store/load-tokens "/test/isaac" "google/tonotop" (fs/instance)))
+
+(describe "the Google OAuth callback door (isaac-2abl)"
+
+  (around [example]
+    (binding [memory/*now* (Instant/parse "2026-09-18T12:05:00Z")]
+      (nexus/-with-nexus {:root "/test/isaac" :fs (fs/mem-fs)}
+        (log/capture-logs (example)))))
+
+  (context "the login the operator just finished"
+
+    (it "exchanges the code as the organization that started the login"
+      (let [captured (atom nil)]
+        (with-redefs [llm-http/post-json! (fn [_url _headers body & _]
+                                            (reset! captured body)
+                                            {:access_token "at-1" :refresh_token "rt-1" :expires_in 3600})]
+          (pending! "st-abcdefgh")
+          (let [response (sut/oauth-callback (callback-request "state=st-abcdefgh&code=4%2F0AbCd"))]
+            (should= 200 (:status response))
+            (should-contain "Signed in as yopp@tonotop.com for organization tonotop" (:body response))
+            (should-contain "You can close this tab" (:body response))))
+        (should= "4/0AbCd" (:code @captured))
+        (should= "isaac-test.apps.googleusercontent.com" (:client_id @captured))
+        (should= "https://isaac.example/google/oauth/callback" (:redirect_uri @captured))
+        (should= "v-1" (:code_verifier @captured))))
+
+    (it "stores the tokens under that organization and spends the state"
+      (with-redefs [llm-http/post-json! (fn [& _] {:access_token "at-1" :refresh_token "rt-1" :expires_in 3600})]
+        (pending! "st-abcdefgh")
+        (sut/oauth-callback (callback-request "state=st-abcdefgh&code=4%2F0AbCd"))
+        (should= "at-1" (:access (stored-tokens)))
+        (should= "rt-1" (:refresh (stored-tokens)))
+        (should-be-nil (logins/pending "/test/isaac" "st-abcdefgh"))))
+
+    (it "says the login finished, naming only the organization"
+      (with-redefs [llm-http/post-json! (fn [& _] {:access_token "at-1" :refresh_token "rt-1" :expires_in 3600})]
+        (pending! "st-abcdefgh")
+        (sut/oauth-callback (callback-request "state=st-abcdefgh&code=4%2F0AbCd"))
+        (let [entry (first (filter #(= :google/login-completed (:event %)) @log/captured-logs))]
+          (should-not-be-nil entry)
+          (should= :info (:level entry))
+          (should= :tonotop (:tenant entry)))))
+
+    ;; A code, a token or the PKCE verifier in a log line is a credential in a
+    ;; log line. None of the three is ever written.
+    (it "writes no code, token or verifier anywhere in the log"
+      (with-redefs [llm-http/post-json! (fn [& _] {:access_token "at-1" :refresh_token "rt-1" :expires_in 3600})]
+        (pending! "st-abcdefgh")
+        (sut/oauth-callback (callback-request "state=st-abcdefgh&code=4%2F0AbCd"))
+        (let [written (pr-str @log/captured-logs)]
+          (should-not-contain "4/0AbCd" written)
+          (should-not-contain "at-1" written)
+          (should-not-contain "rt-1" written)
+          (should-not-contain "v-1" written)))))
+
+  (context "anything else that lands on the callback"
+
+    (it "refuses a state no login is waiting under, and stores nothing"
+      (let [response (sut/oauth-callback (callback-request "state=st-nosuchstate&code=4%2F0AbCd"))]
+        (should= 400 (:status response))
+        (should-contain "sign-in" (:body response))
+        (should-be-nil (stored-tokens))))
+
+    (it "refuses a state that is no state of ours"
+      (should= 400 (:status (sut/oauth-callback (callback-request "state=..%2F..%2Fetc&code=4%2F0AbCd"))))
+      (should-be-nil (stored-tokens)))
+
+    (it "tells an operator whose consent screen went cold to start again"
+      (pending! "st-abcdefgh" "2026-09-18T11:50:00Z")
+      (let [response (sut/oauth-callback (callback-request "state=st-abcdefgh&code=4%2F0AbCd"))]
+        (should= 410 (:status response))
+        (should-contain "expired" (:body response))
+        (should-be-nil (stored-tokens))
+        (should-be-nil (logins/pending "/test/isaac" "st-abcdefgh"))))
+
+    (it "names the failure when Google refused the consent"
+      (pending! "st-abcdefgh")
+      (let [response (sut/oauth-callback (callback-request "state=st-abcdefgh&error=access_denied"))]
+        (should= 400 (:status response))
+        (should-contain "access_denied" (:body response))
+        (should-be-nil (stored-tokens))))
+
+    (it "refuses a login for an organization this host no longer serves"
+      (pending! "st-abcdefgh")
+      (let [request  (assoc (callback-request "state=st-abcdefgh&code=4%2F0AbCd")
+                            :isaac/config {:google {:acme {:oauth {:client-id "other"}}}})
+            response (sut/oauth-callback request)]
+        (should= 400 (:status response))
+        (should-contain "tonotop" (:body response))
+        (should-be-nil (stored-tokens))))
+
+    (it "says so when Google refuses the exchange"
+      (with-redefs [llm-http/post-json! (fn [& _] {:error "invalid_grant" :message "bad code"})]
+        (pending! "st-abcdefgh")
+        (let [response (sut/oauth-callback (callback-request "state=st-abcdefgh&code=4%2F0AbCd"))]
+          (should= 502 (:status response))
+          (should-contain "invalid_grant" (:body response))
+          (should-be-nil (stored-tokens)))))
+
+    ;; Whatever Google echoes back lands in a page this host serves, so it is
+    ;; escaped before it is written.
+    (it "escapes what Google echoed back into the page"
+      (pending! "st-abcdefgh")
+      (let [response (sut/oauth-callback (callback-request "state=st-abcdefgh&error=%3Cscript%3Ealert(1)%3C%2Fscript%3E"))]
+        (should-not-contain "<script>" (:body response))
+        (should-contain "&lt;script&gt;" (:body response)))))
   )

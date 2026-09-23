@@ -85,10 +85,17 @@ and the backoff keeps Pub/Sub from hammering the host.
 - **OAuth consent screen** (`/auth/overview`): app name, support email,
   **Audience: Internal**. If one already exists in the project (another CLI's
   client, say) just confirm Internal.
-- **OAuth client** (`/auth/clients` → Create): **Desktop app**, not Web. The
-  module's redirect URI is `http://localhost:1/`, which only Desktop clients
-  accept unregistered. Keep the id; put the secret on the host:
-  `echo 'GOOGLE_CLIENT_SECRET=…' >> ~/.isaac/.env && chmod 600 ~/.isaac/.env`.
+- **OAuth client** (`/auth/clients` → Create). Keep the id; put the secret on
+  the host: `echo 'GOOGLE_CLIENT_SECRET=…' >> ~/.isaac/.env && chmod 600
+  ~/.isaac/.env`. Which type depends on how the login ends:
+  - **Web application** — for the login that finishes at this host, which is
+    what a host with a public door should use. Under **Authorized redirect
+    URIs** add exactly `https://<host>/google/oauth/callback`. Google refuses
+    the consent with `redirect_uri_mismatch` if it is missing or differs by so
+    much as a trailing slash, and only Web clients have that field at all.
+  - **Desktop app** — for a host the internet cannot reach. Its redirect URI
+    is `http://localhost:1/`, which Desktop clients accept unregistered, and
+    the operator pastes the code with `--code` (below).
 - **Chat app configuration** (Chat API → Configuration): required by Google
   even though Isaac never acts as a bot. Name/avatar/description; **turn
   interactive features OFF** (connection settings / triggers / commands then
@@ -123,12 +130,27 @@ isaac config validate
 isaac google login
 ```
 
-Open the URL **as `<account>`**, approve. The browser lands on
-`http://localhost:1/?state=isaac-google&code=4/0A…` and shows "can't connect":
-expected. Copy the `code=` value (URL-decode `%2F` → `/`), then
-`isaac google login --code 4/0A…` → `Signed in as <account>`. A "7-day refresh
-token — consent screen is still in Testing" warning means the consent screen
-is not Internal; fix and log in again.
+Open the URL **as `<account>`** and approve. Where the browser lands depends
+on whether this host publishes a door:
+
+- **With a push endpoint (or an explicit redirect base).** The consent screen
+  redirects to `https://<host>/google/oauth/callback`, this host exchanges the
+  code itself, and the browser shows "Signed in as `<account>` for
+  organization `<org>`. You can close this tab." The `isaac google login` you
+  left running prints `Signed in for organization <org>` and exits — there is
+  no code to copy. The callback URI is derived from
+  `google.<org>.push.endpoint` by dropping its path; set
+  `google.<org>.oauth.redirect-base` (`https://<host>`, no path) when the
+  callback is served on a different public name.
+- **With neither.** The browser lands on
+  `http://localhost:1/?state=isaac-google&code=4/0A…` and shows "can't
+  connect": expected. Copy the `code=` value (URL-decode `%2F` → `/`), then
+  `isaac google login --code 4/0A…` → `Signed in as <account>`.
+
+The consent screen is good for ten minutes; after that the callback answers
+"That sign-in expired" and the command says `Login timed out — run again, or
+use --code`. A "7-day refresh token — consent screen is still in Testing"
+warning means the consent screen is not Internal; fix and log in again.
 
 Scopes widen when a comm is added (gchat: chat.messages, chat.spaces.readonly;
 gmail: gmail.readonly, gmail.send). Configure the comms you want **before** the

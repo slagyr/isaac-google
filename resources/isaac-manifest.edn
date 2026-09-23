@@ -1,5 +1,5 @@
 {:id          :isaac.google
- :version     "0.1.10"
+ :version     "0.1.11"
  :builtin?    true
  :factory     isaac.google.module/create-module
  :description "Shared Google Workspace plumbing for Isaac — OAuth for the Google user, the Pub/Sub push door and durable inbox, registrations and renewal, health. Knows nothing of Chat or Gmail."
@@ -48,11 +48,20 @@
  ;; instead. There is no unnamed rule, because there is no unnamed
  ;; organization (isaac-okfj).
 
+ ;; The consent redirect arrives from the operator's own browser with no
+ ;; credentials, so the callback route's scope is one isaac.google.door's code
+ ;; verifier grants on that path alone — the handshake is proved by the state
+ ;; nonce and the PKCE verifier the pending login holds (isaac-2abl).
+
  :isaac.http/route
  [{:method  :post
    :path    "/google/pubsub"
    :handler isaac.google.http/handler
-   :scope   :google/push}]
+   :scope   :google/push}
+  {:method  :get
+   :path    "/google/oauth/callback"
+   :handler isaac.google.http/oauth-callback
+   :scope   :google/oauth-callback}]
 
  :isaac/component
  {:google-registration {:namespace isaac.google.component}}
@@ -130,7 +139,11 @@
        :account
        {:type :string,
         :description
-        "Google account the tokens belong to (e.g. yopp@tonotop.com)."}}},
+        "Google account the tokens belong to (e.g. yopp@tonotop.com)."},
+       :redirect-base
+       {:type :string,
+        :description
+        "Public base URL the login's consent screen redirects back to, as https://<host> — the callback is <base>/google/oauth/callback and must be an Authorized redirect URI on the OAuth client. Defaults to the origin of push.endpoint; with neither, the login falls back to pasting a code with --code."}}},
      :push
      {:name :google-push,
       :type :map,

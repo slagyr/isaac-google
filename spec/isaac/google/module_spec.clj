@@ -3,6 +3,7 @@
     [clojure.edn :as edn]
     [isaac.module.protocol]
     [isaac.google.config :as config]
+    [isaac.google.door :as door]
     [isaac.google.module :as sut]
     [isaac.google.people :as people]
     [speclj.core :refer [describe it should should-be-nil should=]]))
@@ -42,6 +43,17 @@
     (should= :map (get-in manifest [:berths :isaac.google/registration :schema :type]))
     (should= 'isaac.google.registration/register!
              (get-in manifest [:berths :isaac.google/registration :schema :value-spec :factory])))
+
+  ;; The login ends at this host: Google redirects the operator's browser to
+  ;; the callback and isaac.google.http finishes the exchange (isaac-2abl).
+  (it "contributes the OAuth callback route beside the push door"
+    (let [routes (into {} (map (juxt :path identity)) (:isaac.http/route manifest))]
+      (should= :post (get-in routes ["/google/pubsub" :method]))
+      (should= :google/push (get-in routes ["/google/pubsub" :scope]))
+      (should= :get (get-in routes ["/google/oauth/callback" :method]))
+      (should= 'isaac.google.http/oauth-callback (get-in routes ["/google/oauth/callback" :handler]))
+      (should= door/CALLBACK-SCOPE (get-in routes ["/google/oauth/callback" :scope]))
+      (should= door/CALLBACK-PATH (get-in routes ["/google/oauth/callback" :path]))))
 
   (it "contributes the registration timer component"
     (should= 'isaac.google.component (get-in manifest [:isaac/component :google-registration :namespace])))

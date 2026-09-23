@@ -46,6 +46,14 @@ Feature: Google user login
     And the stdout contains "openid"
     And the stdout contains "chat.messages.readonly"
 
+  # A host the internet cannot reach has nowhere to redirect the browser, so
+  # it keeps the paste-a-code login (isaac-2abl).
+  Scenario: a host with no public base still logs in by pasting the code
+    When isaac is run with "google login"
+    Then the exit code is 0
+    And the stdout contains "--code <code>"
+    And the stdout contains "redirect_uri=http%3A%2F%2Flocalhost%3A1%2F"
+
   Scenario: missing config fails closed, naming the organization it wants
     Given Isaac root "target/test-state" has no config file
     When isaac is run with "google login"

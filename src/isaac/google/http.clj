@@ -1,5 +1,7 @@
 (ns isaac.google.http
-  "POST /google/pubsub — persist then 204. Processing is the inbox worker.
+  "The module's two public doors.
+
+   POST /google/pubsub — persist then 204. Processing is the inbox worker.
 
    One door serves every Google organization. Which one sent a push is told
    twice: by the project in the subscription name, and by the service account
@@ -9,20 +11,35 @@
 
    A host that configured no organization has no one to own a push, so the
    door refuses it rather than keeping an event nobody answers for — which is
-   what the flat `:google {:project ...}` shape now is (isaac-okfj)."
+   what the flat `:google {:project ...}` shape now is (isaac-okfj).
+
+   GET /google/oauth/callback — the end of `isaac google login`. The operator
+   approves at Google, Google sends the browser here, and this host finishes
+   the login: no code is ever copied out of an address bar. The request
+   carries no credentials, so what it has to prove it proves with the pending
+   login the CLI left behind — the state nonce names it, the PKCE verifier
+   inside it is what Google checks, and ten minutes is all it lives
+   (isaac-2abl)."
   (:require
     [cheshire.core :as json]
+    [clojure.string :as str]
     [isaac.config.loader :as loader]
     [isaac.fs :as fs]
+    [isaac.google.door :as door]
     [isaac.google.health :as health]
     [isaac.google.heartbeat :as heartbeat]
     [isaac.google.inbox :as inbox]
+    [isaac.google.logins :as logins]
+    [isaac.google.oauth :as oauth]
     [isaac.google.push :as push]
     [isaac.google.tenants :as tenants]
+    [isaac.llm.auth.store :as auth-store]
     [isaac.logger :as log]
     [isaac.nexus :as nexus]
     [isaac.tool.memory :as memory])
-  (:import (java.time Instant)))
+  (:import
+    (java.net URLDecoder)
+    (java.time Instant)))
 
 (defn- read-body [request]
   (let [body (:body request)]
@@ -109,3 +126,91 @@
                       :tenant tenant
                       :type (:type event))
             {:status 204 :headers {} :body ""}))))))
+
+;; ---- GET /google/oauth/callback ------------------------------------------
+
+(defn- query-params
+  "The callback's query, whichever way the request carries it: ring's
+   :query-string, or a :uri the caller never split."
+  [request]
+  (let [query (or (not-empty (str (:query-string request)))
+                  (second (str/split (str (:uri request)) #"\?" 2)))]
+    (into {}
+          (keep (fn [pair]
+                  (let [[k v] (str/split pair #"=" 2)]
+                    (when (seq k)
+                      [(keyword (URLDecoder/decode k "UTF-8"))
+                       (URLDecoder/decode (or v "") "UTF-8")]))))
+          (str/split (or query "") #"&"))))
+
+(defn- escape
+  "Whatever Google echoed back lands in a page this host serves."
+  [text]
+  (-> (str text)
+      (str/replace "&" "&amp;")
+      (str/replace "<" "&lt;")
+      (str/replace ">" "&gt;")
+      (str/replace "\"" "&quot;")))
+
+(defn- page [status message]
+  {:status  status
+   :headers {"Content-Type" "text/html; charset=utf-8"}
+   :body    (str "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+                 "<title>Isaac</title></head><body><p>" (escape message)
+                 "</p></body></html>")})
+
+(defn- store-tokens! [root id tokens]
+  (auth-store/save-tokens! root (tenants/auth-provider id) tokens (runtime-fs)))
+
+(defn- complete-login! [root config id state code]
+  (let [creds  (:oauth (tenants/tenant-config config id))
+        verifier (:code-verifier (logins/pending root state))
+        tokens (oauth/exchange-code! (assoc creds
+                                            :redirect-uri (door/redirect-uri config id)
+                                            :code-verifier verifier)
+                                     code)]
+    (cond
+      (:error tokens)
+      (page 502 (str "Google refused the sign-in: " (or (:error tokens) "unknown error")
+                     ". Run `isaac google login` again."))
+
+      (not (:access_token tokens))
+      (page 502 "Google answered the sign-in without an access token. Run `isaac google login` again.")
+
+      :else
+      (do
+        (store-tokens! root id tokens)
+        (logins/forget! root state)
+        (log/info :google/login-completed :tenant id)
+        (page 200 (str "Signed in as " (or (:account creds) "the Google user")
+                       " for organization " (name id) ". You can close this tab."))))))
+
+(defn oauth-callback
+  "The consent redirect. Answers the operator's browser with a plain page and
+   stores nothing it cannot account for."
+  [request]
+  (let [root    (or (nexus/get :root) (:isaac/root request))
+        config  (live-config request root)
+        {:keys [state code error]} (query-params request)
+        record  (logins/pending root state)
+        now     (or (memory/now) (Instant/now))]
+    (cond
+      (nil? record)
+      (page 400 "That sign-in is unknown to this Isaac. Run `isaac google login` again.")
+
+      (logins/expired? record now)
+      (do (logins/forget! root state)
+          (page 410 "That sign-in expired. Run `isaac google login` again."))
+
+      (seq error)
+      (page 400 (str "Google refused the sign-in: " error "."))
+
+      (str/blank? code)
+      (page 400 "Google sent no authorization code. Run `isaac google login` again.")
+
+      (nil? (tenants/tenant-config config (:tenant record)))
+      (page 400 (str "This Isaac no longer serves organization " (name (:tenant record))
+                     ". Nothing was stored."))
+
+      :else
+      (complete-login! root config (:tenant record) state code))))

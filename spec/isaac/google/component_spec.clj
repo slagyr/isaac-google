@@ -9,6 +9,12 @@
     [isaac.scheduler.runtime :as scheduler]
     [speclj.core :refer :all]))
 
+(defn- entry-id
+  "What the identity seam was handed: a trust rule arrives as [id rule], the
+   callback's code verifier as the function itself."
+  [entry]
+  (if (fn? entry) (:name (meta entry)) (first entry)))
+
 (describe "google runtime component"
 
   ;; The registration tick is a slow watch: renewals are judged in hours and
@@ -69,8 +75,8 @@
         (nexus/-with-nexus {:scheduler sched}
           (sut/start! {:config            {:google {:tonotop {:project "marigold"}
                                                     :acme    {:project "acme-prod"}}}
-                       :register-identity! (fn [entry] (swap! registered conj (first entry)))}))
-        (should= [:google-pubsub/acme :google-pubsub/tonotop] (sort @registered))
+                       :register-identity! (fn [entry] (swap! registered conj (entry-id entry)))}))
+        (should= [:google/oauth-callback :google-pubsub/acme :google-pubsub/tonotop] (sort @registered))
         (scheduler/shutdown! sched)))
 
     (it "registers a one-organization host's single rule, named after it"
@@ -78,8 +84,8 @@
             sched      (scheduler/create {})]
         (nexus/-with-nexus {:scheduler sched}
           (sut/start! {:config             {:google {:tonotop {:project "marigold"}}}
-                       :register-identity! (fn [entry] (swap! registered conj (first entry)))}))
-        (should= [:google-pubsub/tonotop] @registered)
+                       :register-identity! (fn [entry] (swap! registered conj (entry-id entry)))}))
+        (should= [:google-pubsub/tonotop :google/oauth-callback] @registered)
         (scheduler/shutdown! sched)))
 
     ;; A host that starts no background services still answers pushes, so the
@@ -87,14 +93,30 @@
     (it "registers the door at start even when background services are off"
       (let [registered (atom [])]
         (loader/set-snapshot! {:google {:acme {:project "acme-prod"}}} "component spec")
-        (with-redefs [door/registrar (fn [] (fn [entry] (swap! registered conj (first entry))))]
+        (with-redefs [door/registrar (fn [] (fn [entry] (swap! registered conj (entry-id entry))))]
           (component/start (sut/->RegistrationTimer {:start-background-services? false} (atom nil))))
-        (should= [:google-pubsub/acme] @registered)))
+        (should= [:google-pubsub/acme :google/oauth-callback] @registered)))
 
     (it "takes the live config when no config is named"
       (let [registered (atom [])]
         (loader/set-snapshot! {:google {:tonotop {:project "marigold"}}} "component spec")
-        (with-redefs [door/registrar (fn [] (fn [entry] (swap! registered conj (first entry))))]
+        (with-redefs [door/registrar (fn [] (fn [entry] (swap! registered conj (entry-id entry))))]
           (sut/register-door! nil nil))
-        (should= [:google-pubsub/tonotop] @registered))))
+        (should= [:google-pubsub/tonotop :google/oauth-callback] @registered)))
+
+    ;; The consent redirect is a browser with no credentials, so the callback
+    ;; door opens itself — on that one path, with one scope (isaac-2abl).
+    (it "opens the OAuth callback door alongside the push door"
+      (let [registered (atom [])]
+        (loader/set-snapshot! {:google {:tonotop {:project "marigold"}}} "component spec")
+        (with-redefs [door/registrar (fn [] (fn [entry] (swap! registered conj entry)))]
+          (sut/register-door! nil nil))
+        (should-contain door/callback-verifier @registered)))
+
+    (it "opens no door at all on a host that serves no Google organization"
+      (let [registered (atom [])]
+        (loader/set-snapshot! {} "component spec")
+        (with-redefs [door/registrar (fn [] (fn [entry] (swap! registered conj entry)))]
+          (sut/register-door! nil nil))
+        (should= [] @registered))))
   )

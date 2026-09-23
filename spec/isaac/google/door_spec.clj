@@ -68,4 +68,48 @@
     ;; it simply has no door to register with.
     (it "is quiet when there is no http module to register with"
       (should-be-nil (sut/register-trust-rules! two-tenant-config nil))))
+
+  (context "where Google sends the operator back (isaac-2abl)"
+
+    (it "hangs the callback off the host the push endpoint already publishes"
+      (should= "https://isaac.example/google/oauth/callback"
+               (sut/redirect-uri one-tenant-config :tonotop)))
+
+    (it "prefers the redirect base an organization states outright"
+      (let [config (assoc-in one-tenant-config [:google :tonotop :oauth :redirect-base]
+                             "https://isaac.tonotop.example/")]
+        (should= "https://isaac.tonotop.example/google/oauth/callback"
+                 (sut/redirect-uri config :tonotop))))
+
+    ;; No public base is the whole answer: a host nobody can reach from the
+    ;; internet keeps the paste-a-code login (isaac-2abl).
+    (it "has nowhere to send the operator without a push endpoint or a base"
+      (should-be-nil (sut/redirect-uri {:google {:tonotop {:oauth {:client-id "cid"}}}} :tonotop))
+      (should-be-nil (sut/redirect-uri {} nil))))
+
+  (context "the callback's own door"
+
+    (it "opens itself for the consent redirect, which carries no credentials"
+      (should= {:name :google/oauth-callback :scopes #{:google/oauth-callback}}
+               (sut/callback-verifier {:request-method :get :uri "/google/oauth/callback"})))
+
+    (it "opens nothing else"
+      (should-be-nil (sut/callback-verifier {:request-method :get :uri "/google/pubsub"}))
+      (should-be-nil (sut/callback-verifier {:request-method :post :uri "/google/oauth/callback"})))
+
+    (it "registers itself with the http identity seam"
+      (let [registered (atom [])]
+        (sut/register-callback! one-tenant-config (fn [entry] (swap! registered conj entry)))
+        (should= [sut/callback-verifier] @registered)))
+
+    ;; Registering any verifier turns isaac-http's auth on for the whole
+    ;; server. A host with no Google organization has no login to complete,
+    ;; so it gets no verifier and no surprise.
+    (it "stays out of a host that serves no Google organization"
+      (let [registered (atom [])]
+        (sut/register-callback! {} (fn [entry] (swap! registered conj entry)))
+        (should= [] @registered)))
+
+    (it "is quiet when there is no http module to register with"
+      (should-be-nil (sut/register-callback! one-tenant-config nil))))
   )

@@ -5,7 +5,13 @@
    Google user, so its tokens are stored under its own provider key and
    `--tenant` says which one is signing in. A host with one organization may
    leave `--tenant` off — there is only one to mean; a host with several sees
-   its status grouped by organization (isaac-okfj)."
+   its status grouped by organization (isaac-okfj).
+
+   The login ends where the host can be reached. A host that publishes a door
+   sends the consent screen back to its own /google/oauth/callback and waits
+   at the terminal while that finishes — nothing is copied out of an address
+   bar. A host the internet cannot reach still prints a localhost URL and
+   takes the code with `--code` (isaac-2abl)."
   (:require
     [babashka.http-client :as http]
     [clojure.string :as str]
@@ -16,9 +22,11 @@
     [isaac.config.loader :as loader]
     [isaac.config.root :as root]
     [isaac.fs :as fs]
+    [isaac.google.door :as door]
     [isaac.google.events :as events]
     [isaac.google.health :as health]
     [isaac.google.inbox :as inbox]
+    [isaac.google.logins :as logins]
     [isaac.google.oauth :as oauth]
     [isaac.google.pubsub :as pubsub]
     [isaac.google.registration :as registration]
@@ -29,10 +37,24 @@
     [isaac.nexus :as nexus])
   (:import (java.time Instant)))
 
-(def REDIRECT-URI "http://localhost:1/")
+(def REDIRECT-URI
+  "Where the consent screen lands when this host is not reachable from the
+   internet: nowhere, so the operator copies the code out of the address bar
+   and runs `--code`. A host that publishes a push endpoint (or states an
+   oauth.redirect-base) uses its own callback instead (isaac-2abl)."
+  "http://localhost:1/")
+
+(def ^:dynamic *poll-interval-ms*
+  "How often the login looks to see whether the callback has finished."
+  2000)
+
+(def ^:dynamic *poll-timeout-ms*
+  "How long the login waits at the terminal — the same ten minutes the
+   pending login itself lives."
+  600000)
 
 (def option-spec
-  [[nil "--code CODE" "Authorization code pasted from the Google consent screen"]
+  [[nil "--code CODE" "Authorization code pasted from the Google consent screen (hosts with no public callback)"]
    [nil "--tenant TENANT" "Google organization to sign in as (default: the only one configured)"]
    ["-h" "--help" "Show help"]])
 
@@ -96,6 +118,55 @@
     (println url)
     0))
 
+;; ---- the login that finishes at this host (isaac-2abl) -------------------
+
+(defn- await-callback!
+  "Wait at the terminal while the operator approves at Google. The callback
+   door deletes the pending login once it has stored the tokens, so the file
+   going away is the login finishing."
+  [opts root id state]
+  (let [fs*      (feature-fs opts)
+        pending? (fn [] (nexus/-with-nested-nexus {:fs fs* :root root}
+                          (some? (logins/pending root state))))
+        deadline (+ (System/currentTimeMillis) *poll-timeout-ms*)]
+    (loop []
+      (cond
+        (not (pending?))
+        (do (println (str "Signed in for organization " (name id))) 0)
+
+        (< deadline (System/currentTimeMillis))
+        (do (nexus/-with-nested-nexus {:fs fs* :root root} (logins/forget! root state))
+            (binding [*out* *err*]
+              (println "Login timed out — run again, or use --code"))
+            1)
+
+        :else
+        (do (Thread/sleep *poll-interval-ms*) (recur))))))
+
+(defn- start-host-login!
+  "Send the operator to Google with a redirect back to this host, and keep
+   the state nonce and PKCE verifier that will let the callback finish."
+  [opts config id redirect-uri]
+  (let [root     (derive-root opts)
+        fs*      (feature-fs opts)
+        oauth    (oauth-from config id)
+        scopes   (scopes/union)
+        state    (logins/state-nonce)
+        verifier (logins/code-verifier)]
+    (nexus/-with-nested-nexus {:fs fs* :root root}
+      (logins/save! root state {:tenant        id
+                                :scopes        scopes
+                                :code-verifier verifier
+                                :created-at    (str (Instant/now))}))
+    (println (str "Open this URL as the Google user and approve — this command "
+                  "waits for the browser to come back:"))
+    (println (oauth/authorization-url {:client-id      (:client-id oauth)
+                                       :scopes         scopes
+                                       :redirect-uri   redirect-uri
+                                       :state          state
+                                       :code-challenge (logins/code-challenge verifier)}))
+    (await-callback! opts root id state)))
+
 (defn- exchange-and-store! [opts config id code]
   (let [oauth  (oauth-from config id)
         tokens (oauth/exchange-code! (assoc oauth :redirect-uri REDIRECT-URI) code)]
@@ -132,7 +203,9 @@
             1)
 
         (str/blank? code)
-        (print-auth-url! config id)
+        (if-let [redirect-uri (door/redirect-uri config id)]
+          (start-host-login! opts config id redirect-uri)
+          (print-auth-url! config id))
 
         :else
         (exchange-and-store! opts config id code)))
@@ -389,6 +462,6 @@
   option-spec)
 
 (defmethod cli-api/subcommands :google [_id]
-  [{:name "login"  :summary "Sign in as the Google user (authorization-code paste; --tenant for one of several)"}
+  [{:name "login"  :summary "Sign in as the Google user — the consent screen comes back to this host, or --code to paste it (--tenant for one of several)"}
    {:name "status" :summary "Show Google registrations, expiries, last event, and door"}
    {:name "smoke"  :summary "Live-host smoke before a release: door, registrations, inbox, silence (--send-live for one real message)"}])
