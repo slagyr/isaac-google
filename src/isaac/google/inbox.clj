@@ -27,6 +27,9 @@
 (defn- failed-path [root message-id]
   (str (inbox-dir root) "/failed/" message-id ".edn"))
 
+(defn- unhandled-path [root message-id]
+  (str (inbox-dir root) "/unhandled/" message-id ".edn"))
+
 (defn- seen-path [root]
   (str (inbox-dir root) "/seen.edn"))
 
@@ -90,15 +93,35 @@
 (defn mark-failed! [root message-id]
   (move! root message-id (failed-path root message-id)))
 
+(defn mark-unhandled!
+  "A record whose ce-type no handler claims: parked so the worker never
+   reads it again. Distinct from `mark-failed!` — a handler that threw is
+   retried by an operator clearing failed/; an unhandled record has no
+   handler to retry it with (isaac-pl8x)."
+  [root message-id]
+  (move! root message-id (unhandled-path root message-id)))
+
+(defn unhandled
+  "Records parked because no handler claims their type."
+  [root]
+  (let [fs*  (runtime-fs)
+        dir  (str (inbox-dir root) "/unhandled")]
+    (if (fs/exists? fs* dir)
+      (->> (fs/children fs* dir)
+           (filter #(re-find #"\.edn$" %))
+           (mapv #(read-edn fs* (str dir "/" %))))
+      [])))
+
 (defn status
-  "Where message-id currently sits: :pending, :done, :failed, or :unknown (not
-   yet arrived, or arrived and never accepted). Lets a caller outside the
-   worker (the live smoke driver) poll a specific record's progress without
-   knowing the inbox's directory layout."
+  "Where message-id currently sits: :pending, :done, :failed, :unhandled, or
+   :unknown (not yet arrived, or arrived and never accepted). Lets a caller
+   outside the worker (the live smoke driver) poll a specific record's
+   progress without knowing the inbox's directory layout."
   [root message-id]
   (let [fs* (runtime-fs)]
     (cond
-      (fs/exists? fs* (pending-path root message-id)) :pending
-      (fs/exists? fs* (done-path root message-id))    :done
-      (fs/exists? fs* (failed-path root message-id))  :failed
-      :else                                            :unknown)))
+      (fs/exists? fs* (pending-path root message-id))   :pending
+      (fs/exists? fs* (done-path root message-id))      :done
+      (fs/exists? fs* (failed-path root message-id))    :failed
+      (fs/exists? fs* (unhandled-path root message-id)) :unhandled
+      :else                                              :unknown)))

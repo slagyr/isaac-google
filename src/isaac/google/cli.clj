@@ -315,6 +315,8 @@
           (println (str "tenant: " (name id))))
         (doseq [line (tenant-status-lines root fs* state id)]
           (println (if several (str "  " line) line))))
+      (let [unhandled (nexus/-with-nested-nexus {:fs fs* :root root} (inbox/unhandled root))]
+        (println (str "inbox: " (count unhandled) " unhandled")))
       0)
     (catch Exception e
       (binding [*out* *err*]
@@ -330,9 +332,34 @@
 ;; HTTP. See doc/rollout.md "Smoke before shipping" for what each check
 ;; means and how to run it.
 
+(defn- http-server-config-fn
+  "isaac-http's own resolved bind config — isaac.config.server-config/
+   server-config, which defaults :port to 6674 exactly as the server itself
+   does when a host sets no :http :port. isaac-google does not depend on
+   isaac-http at compile time (the same requiring-resolve seam
+   isaac.google.door/registrar uses for the identity layer), so a host that
+   has not loaded isaac-http gets nil here and falls back below."
+  []
+  (try (requiring-resolve 'isaac.config.server-config/server-config)
+       (catch Exception _ nil)))
+
+(def ^:private FALLBACK-HTTP-PORT
+  "isaac-http's own default (isaac.config.server-config/server-config) for a
+   host with no :http :port configured. Kept here only for a host where
+   isaac-http itself is not loaded to resolve against (isaac-8zl8)."
+  6674)
+
+(defn- resolved-http-port
+  "The port the server actually listens on: isaac-http's resolved default
+   when the host sets no :http :port, not the raw config key most hosts
+   leave unset."
+  [config]
+  (if-let [server-config (http-server-config-fn)]
+    (:port (server-config config))
+    (or (get-in config [:http :port]) FALLBACK-HTTP-PORT)))
+
 (defn- default-door-url [config]
-  (let [port (or (get-in config [:http :port]) 8080)]
-    (str "http://127.0.0.1:" port smoke/DOOR-PATH)))
+  (str "http://127.0.0.1:" (resolved-http-port config) smoke/DOOR-PATH))
 
 (defn- probe-door!
   "POST an empty, unauthenticated body at the door. isaac-http's identity
@@ -356,7 +383,7 @@
   [config id]
   (pubsub/publish! config id
                    {:data       {:isaac-smoke true :at (str (Instant/now))}
-                    :attributes {"ce-type" "isaac.google.smoke/probe"}}))
+                    :attributes {"ce-type" smoke/PROBE-TYPE}}))
 
 (defn- await-arrival!
   "Polls inbox/*'s status for message-id until it leaves :unknown or the
@@ -414,7 +441,8 @@
                                                       per-tenant)
                                        :state   state :remote all-remote :door-up? true})
           pending    (nexus/-with-nested-nexus {:fs fs* :root root} (inbox/pending root))
-          inbox-result  (smoke/decide-inbox {:pending pending :threshold (:inbox-threshold opts)})
+          unhandled  (nexus/-with-nested-nexus {:fs fs* :root root} (inbox/unhandled root))
+          inbox-result  (smoke/decide-inbox {:pending pending :unhandled unhandled :threshold (:inbox-threshold opts)})
           silent-result (smoke/decide-silent {:conditions conditions :threshold (:silent-threshold opts)})
           live-results  (when (:send-live opts)
                           (mapv #(live-push-check! root config % (:timeout-ms opts)) ids))

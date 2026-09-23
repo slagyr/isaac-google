@@ -1,5 +1,5 @@
 {:id          :isaac.google
- :version     "0.1.12"
+ :version     "0.1.13"
  :builtin?    true
  :factory     isaac.google.module/create-module
  :description "Shared Google Workspace plumbing for Isaac — OAuth for the Google user, the Pub/Sub push door and durable inbox, registrations and renewal, health. Knows nothing of Chat or Gmail."
@@ -35,6 +35,14 @@
  :isaac.google/scopes ["openid"
                        "https://www.googleapis.com/auth/directory.readonly"
                        "https://www.googleapis.com/auth/pubsub"]
+
+ ;; The smoke probe (`isaac google smoke --send-live`) publishes one real
+ ;; message of this ce-type to prove the door and inbox/accept! against a
+ ;; genuine Google-signed push. With no handler it would sit in pending/
+ ;; forever, or now, in unhandled/ with a warning on every host it ran
+ ;; against — a probe should leave nothing behind (isaac-pl8x).
+ :isaac.google/handler
+ {"isaac.google.smoke/probe" isaac.google.smoke/noop-handler}
 
  ;; Who is this person? The agent asks Google with Isaac's own token, rather
  ;; than a crew shelling out to another CLI with its own grant (isaac-jqk2).

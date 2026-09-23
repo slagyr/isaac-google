@@ -78,7 +78,7 @@
 (describe "google smoke — inbox (isaac-ro67: the inbox worker was never scheduled)"
 
   (it "passes when pending is empty"
-    (should= {:check :inbox :status :pass :evidence "0 pending record(s), threshold 0"}
+    (should= {:check :inbox :status :pass :evidence "0 pending record(s), 0 unhandled, threshold 0"}
              (sut/decide-inbox {:pending [] :threshold 0})))
 
   (it "passes when pending is at the threshold"
@@ -89,6 +89,19 @@
       (should= :fail (:status result))
       (should-contain "2 pending" (:evidence result))
       (should-contain "m-1" (:evidence result))))
+
+  ;; Unhandled records (no handler for their ce-type, isaac-pl8x) are shown
+  ;; but never gate the verdict — they are already parked, not backlog.
+  (it "shows the unhandled count without failing on it"
+    (let [result (sut/decide-inbox {:pending [] :unhandled [{:message-id "m-3"}] :threshold 0})]
+      (should= :pass (:status result))
+      (should-contain "1 unhandled" (:evidence result))))
+  )
+
+(describe "google smoke — probe handler (isaac-pl8x: --send-live leaves nothing behind)"
+
+  (it "does nothing — the worker marks the record done once it returns"
+    (should-be-nil (sut/noop-handler {:message-id "probe-1" :type sut/PROBE-TYPE :data {}})))
   )
 
 (describe "google smoke — silent (the per-tenant silence and heartbeat watchdogs)"

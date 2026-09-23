@@ -20,6 +20,16 @@
 (def DEFAULT-INBOX-THRESHOLD 0)
 (def DEFAULT-SILENT-THRESHOLD 0)
 (def DOOR-PATH "/google/pubsub")
+(def PROBE-TYPE "isaac.google.smoke/probe")
+
+(defn noop-handler
+  "The smoke probe's own handler: `--send-live` publishes one real message of
+   this ce-type so `decide-live-push` can prove it reached the inbox. With no
+   handler it would sit in pending/ forever, or now, in unhandled/ with a
+   warning on every host it ran against — a probe should leave nothing behind
+   (isaac-pl8x)."
+  [_event]
+  nil)
 
 ;; ---- verdicts -----------------------------------------------------------
 
@@ -112,13 +122,19 @@
    scheduled, running worker drains pending records continuously; a worker
    that was never scheduled leaves them to accumulate forever, which is
    exactly what shipped once (isaac-ro67) and every timer-stepping suite
-   missed."
-  [{:keys [pending threshold]}]
+   missed.
+
+   `unhandled` — records parked because no handler claims their ce-type — is
+   reported alongside but never gates the verdict: an unhandled record is
+   dealt with (parked, one warning already logged), not backlog piling up
+   (isaac-pl8x)."
+  [{:keys [pending unhandled threshold]}]
   (let [threshold (or threshold DEFAULT-INBOX-THRESHOLD)
-        n         (count pending)]
+        n         (count pending)
+        u         (count unhandled)]
     (if (<= n threshold)
-      (pass :inbox (str n " pending record(s), threshold " threshold))
-      (fail :inbox (str n " pending record(s) exceeds threshold " threshold
+      (pass :inbox (str n " pending record(s), " u " unhandled, threshold " threshold))
+      (fail :inbox (str n " pending record(s), " u " unhandled, exceeds threshold " threshold
                         (when-let [sample (first pending)]
                           (str "; e.g. message-id " (:message-id sample))))))))
 

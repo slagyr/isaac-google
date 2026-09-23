@@ -57,4 +57,10 @@
 
   (it "contributes the registration timer component"
     (should= 'isaac.google.component (get-in manifest [:isaac/component :google-registration :namespace])))
+
+  ;; The smoke probe needs a handler of its own or `--send-live` leaves a
+  ;; record behind that the worker warns about forever (isaac-pl8x).
+  (it "contributes a no-op handler for its own smoke probe type"
+    (should= 'isaac.google.smoke/noop-handler
+             (get-in manifest [:isaac.google/handler "isaac.google.smoke/probe"])))
   )

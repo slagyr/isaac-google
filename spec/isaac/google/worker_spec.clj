@@ -53,4 +53,24 @@
     (accept! {:message-id "m-4" :type "chat/created" :tenant :acme :data {}})
     (sut/tick!)
     (should-be-nil tenants/*tenant*))
+
+  ;; A record whose ce-type no handler claims used to be re-read on every
+  ;; tick, warning :google/handler-missing forever (1,800/hour on the live
+  ;; host, isaac-pl8x). It is parked on first sight instead.
+  (context "a record whose type has no handler (isaac-pl8x)"
+
+    (it "moves the record to unhandled/ with one warning"
+      (accept! {:message-id "m-5" :type "unknown/type" :data {}})
+      (sut/tick!)
+      (should-not (fs/exists? (fs/instance) (str ROOT "/google/inbox/pending/m-5.edn")))
+      (should (fs/exists? (fs/instance) (str ROOT "/google/inbox/unhandled/m-5.edn")))
+      (should= [{:event :google/handler-missing :message-id "m-5" :type "unknown/type"}]
+               (mapv #(select-keys % [:event :message-id :type]) @log/captured-logs)))
+
+    (it "stays silent on the next tick — the record is no longer in pending/"
+      (accept! {:message-id "m-6" :type "unknown/type" :data {}})
+      (sut/tick!)
+      (sut/tick!)
+      (should= [{:event :google/handler-missing :message-id "m-6" :type "unknown/type"}]
+               (mapv #(select-keys % [:event :message-id :type]) @log/captured-logs))))
   )

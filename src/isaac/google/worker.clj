@@ -4,7 +4,11 @@
    The door stamped each record with the Google organization that sent it, so
    the worker acts as that tenant while its handler runs — a handler asks for
    \"the token\" and gets the right organization's token without being told
-   which (isaac-1zkz)."
+   which (isaac-1zkz).
+
+   A record whose ce-type no handler claims is parked in inbox/unhandled/ on
+   first sight, with one warning. It is not re-read on the next tick because
+   it is no longer in pending/ (isaac-pl8x)."
   (:require
     [isaac.google.handler :as handler]
     [isaac.google.inbox :as inbox]
@@ -25,7 +29,9 @@
              f          (handler/lookup type)]
          (cond
            (nil? f)
-           (log/warn :google/handler-missing :message-id message-id :type type)
+           (do
+             (log/warn :google/handler-missing :message-id message-id :type type)
+             (inbox/mark-unhandled! root message-id))
 
            :else
            (try
