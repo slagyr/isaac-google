@@ -139,6 +139,17 @@
   (str/join "." (concat (map name (tenants/config-path config (or id :<organization>)))
                         INTERVAL-KEY-LEAF)))
 
+(def ENABLED-KEY-LEAF ["health" "heartbeat" "enabled"])
+
+(defn heartbeat-enabled-key
+  "The retired on/off key, named where an operator will recognise it."
+  [config id]
+  (str/join "." (concat (map name (tenants/config-path config (or id :<organization>)))
+                        ENABLED-KEY-LEAF)))
+
+(def RETIRED-ENABLED-REASON
+  "is retired and ignored: naming health.heartbeat.expected-interval-ms is what turns the watch on now, because only the publisher's schedule can say what late means. No heartbeat is being watched for this organization. Unset it (isaac-clly)")
+
 (def MISSING-INTERVAL-REASON
   "names no interval: the heartbeat is published from outside Isaac (a Cloud Scheduler job on the topic), so only the schedule it runs on can say what late means — set it, or configure no heartbeat at all (isaac-clly)")
 
@@ -158,19 +169,33 @@
    `constraints/iam.disableServiceAccountKeyCreation` to refuse. What is left
    to get wrong is the interval, so that is what the loader checks."
   [{:keys [config]}]
-  {:errors
-   (vec
-     (keep (fn [[id tenant]]
-             (let [heartbeat (get-in tenant [:health :heartbeat])]
-               (cond
-                 (heartbeat-watched? config id) nil
+  (let [entries (sort-by key (tenants/tenants config))
+        for-each (fn [f] (vec (keep f entries)))]
+    {:errors
+     ;; The only hard refusal: an interval was named and cannot work. The
+     ;; operator asked for a watch and would not get one.
+     (for-each (fn [[id tenant]]
+                 (let [heartbeat (get-in tenant [:health :heartbeat])]
+                   (when (and (not (heartbeat-watched? config id))
+                              (some? (:expected-interval-ms heartbeat)))
+                     {:key (heartbeat-interval-key config id) :value BAD-INTERVAL-REASON}))))
 
-                 (some? (:expected-interval-ms heartbeat))
-                 {:key (heartbeat-interval-key config id) :value BAD-INTERVAL-REASON}
+     ;; Everything else is a warning. Leftover config is not a reason to
+     ;; refuse to start: a host that merely receives is working, and the
+     ;; retired key changes nothing now that the interval is the switch.
+     :warnings
+     (for-each (fn [[id tenant]]
+                 (let [heartbeat (get-in tenant [:health :heartbeat])]
+                   (cond
+                     (heartbeat-watched? config id) nil
 
-                 (and (map? heartbeat) (seq heartbeat))
-                 {:key (heartbeat-interval-key config id) :value MISSING-INTERVAL-REASON})))
-           (sort-by key (tenants/tenants config))))})
+                     (some? (:expected-interval-ms heartbeat)) nil ; already an error
+
+                     (contains? heartbeat :enabled)
+                     {:key (heartbeat-enabled-key config id) :value RETIRED-ENABLED-REASON}
+
+                     (and (map? heartbeat) (seq heartbeat))
+                     {:key (heartbeat-interval-key config id) :value MISSING-INTERVAL-REASON}))))}))
 
 ;; endregion
 

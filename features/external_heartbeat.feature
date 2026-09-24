@@ -22,15 +22,15 @@ Feature: The heartbeat is published from outside Isaac
     When isaac is run with "config validate"
     Then the exit code is 0
 
-  # The demand that used to be a service-account key is now an interval, and
-  # it is the only half-configuration there is: everything else about the
-  # heartbeat has a default.
-  Scenario: a heartbeat configured with no interval is a config error
+  # Leftover or half-finished heartbeat config is a warning, not a refusal.
+  # The host still receives; it simply watches for nothing, and is told so.
+  # Refusing here would stop a working host over config that changes nothing.
+  Scenario: a heartbeat configured with no interval warns and still validates
     Given config:
       | google.tonotop.topic                     | projects/marigold/topics/isaac |
       | google.tonotop.health.heartbeat.grace-ms | 60000                          |
     When isaac is run with "config validate"
-    Then the exit code is 1
+    Then the exit code is 0
     And the stderr matches:
       | pattern                                                    |
       | google\.tonotop\.health\.heartbeat\.expected-interval-ms   |
@@ -46,12 +46,14 @@ Feature: The heartbeat is published from outside Isaac
       | positive |
 
   # An operator who had the heartbeat switched on is told what replaced the
-  # switch, rather than leaving an unknown-key warning behind and a dark watch.
-  Scenario: the enabled switch is retired, naming the key that replaced it
+  # switch — but is not stopped. yopp ran health.heartbeat.enabled false for a
+  # day; upgrading onto a build that refused it would have taken the host down
+  # over a key that now changes nothing.
+  Scenario: the retired enabled switch warns and names its replacement
     Given config:
       | google.tonotop.health.heartbeat.enabled | false |
     When isaac is run with "config validate"
-    Then the exit code is 1
+    Then the exit code is 0
     And the stderr matches:
       | pattern              |
       | retired              |

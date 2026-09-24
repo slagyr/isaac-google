@@ -48,10 +48,14 @@
 
   ;; An operator who had it on is told what replaced it, rather than having
   ;; the key read as an unknown-key warning and the watch stay dark.
-  (it "retires the enabled switch, naming the key that replaced it"
+  ;; Retired, but not a refusal: a leftover switch changes nothing now that
+  ;; the interval is what turns the watch on, and a host that merely receives
+  ;; should not be stopped from starting over it (isaac-clly).
+  (it "retires the enabled switch without making it a hard error"
     (let [enabled (get-in sut/google-schema [:value-spec :schema :health :schema :heartbeat :schema :enabled])]
-      (should-contain :retired? (flatten (:validations enabled)))
-      (should-contain "expected-interval-ms" (str (:validations enabled)))))
+      (should-be-nil (:validations enabled))
+      (should-contain "Retired" (:description enabled))
+      (should-contain "expected-interval-ms" (:description enabled))))
 
   (it "declares no deadline — there is no send to be late from"
     (should-be-nil (get-in sut/google-schema [:value-spec :schema :health :schema :heartbeat :schema :deadline-ms])))

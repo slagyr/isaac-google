@@ -196,11 +196,26 @@
     (it "passes an organization that names its interval"
       (should= [] (heartbeat-errors watching)))
 
-    (it "refuses a heartbeat configured with no interval"
-      (let [errors (heartbeat-errors {:google {:tonotop {:health {:heartbeat {:grace-ms 60000}}}}})]
-        (should= 1 (count errors))
-        (should= "google.tonotop.health.heartbeat.expected-interval-ms" (:key (first errors)))
-        (should-contain "no interval" (:value (first errors)))))
+    ;; Leftover config is not a reason to refuse to start. A host that merely
+    ;; receives is working; nothing is watched, and saying so once is enough.
+    (it "warns rather than refuses when a heartbeat names no interval"
+      (let [result   (sut/check-heartbeat {:config {:google {:tonotop {:health {:heartbeat {:grace-ms 60000}}}}}})
+            warnings (:warnings result)]
+        (should= [] (:errors result))
+        (should= 1 (count warnings))
+        (should= "google.tonotop.health.heartbeat.expected-interval-ms" (:key (first warnings)))
+        (should-contain "no interval" (:value (first warnings)))))
+
+    ;; yopp ran health.heartbeat.enabled false for a day. Upgrading onto a
+    ;; build that refused it would have taken the host down over a key that
+    ;; now changes nothing (isaac-clly).
+    (it "warns rather than refuses on the retired enabled switch, naming its replacement"
+      (let [result   (sut/check-heartbeat {:config {:google {:tonotop {:health {:heartbeat {:enabled false}}}}}})
+            warnings (:warnings result)]
+        (should= [] (:errors result))
+        (should= 1 (count warnings))
+        (should= "google.tonotop.health.heartbeat.enabled" (:key (first warnings)))
+        (should-contain "expected-interval-ms" (:value (first warnings)))))
 
     (it "refuses an interval that is not a positive number of milliseconds"
       (let [errors (heartbeat-errors {:google {:tonotop {:health {:heartbeat {:expected-interval-ms 0}}}}})]
@@ -209,9 +224,9 @@
 
     (it "names each organization that is half-configured"
       (should= ["google.acme.health.heartbeat.expected-interval-ms"]
-               (mapv :key (heartbeat-errors
-                            {:google {:tonotop watching-tenant
-                                      :acme    {:health {:heartbeat {:grace-ms 1000}}}}})))))
+               (mapv :key (:warnings (sut/check-heartbeat
+                                       {:config {:google {:tonotop watching-tenant
+                                                          :acme    {:health {:heartbeat {:grace-ms 1000}}}}}}))))))
 
   (context "notification state"
 

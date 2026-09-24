@@ -33,8 +33,7 @@
                  :grace-ms             {:type        :int
                                         :description "Milliseconds of slack past the expected arrival — scheduler jitter plus Pub/Sub delivery — before a heartbeat counts as missed. Default 60000."}
                  :enabled              {:type        :boolean
-                                        :validations [[:retired? "the heartbeat is published from outside Isaac now — set health.heartbeat.expected-interval-ms to the schedule the Cloud Scheduler job publishes on, or unset the heartbeat entirely (isaac-clly)"]]
-                                        :description "Retired. Naming :expected-interval-ms is what turns the watch on; a switch that could be on over an interval nobody set is the inert watchdog this replaced."}}})
+                                        :description "Retired and ignored; leaving it set is a warning, not a refusal. Naming :expected-interval-ms is what turns the watch on — a switch that could be on over an interval nobody set is the inert watchdog this replaced. Declared here only so a leftover value is reported once, by the heartbeat check, rather than twice."}}})
 
 (def health-schema
   {:name        :google-health
