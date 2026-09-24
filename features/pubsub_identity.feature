@@ -57,7 +57,8 @@ Feature: Pub/Sub publishes as a service account
       | google.tonotop.pubsub.credentials-file | google/pubsub-sa.json          |
     And a Pub/Sub service-account key at "google/pubsub-sa.json"
     When isaac is run with "config validate"
-    Then the stderr does not contain "pubsub.credentials-file"
+    Then the exit code is 0
+    And the stderr does not contain "pubsub.credentials-file"
 
   # An organization with no topic publishes nothing, so it needs no publishing
   # identity. Asking for one would be ceremony — and would break every host
@@ -67,4 +68,5 @@ Feature: Pub/Sub publishes as a service account
       | google.tonotop.oauth.client-id     | isaac-test.apps.googleusercontent.com |
       | google.tonotop.oauth.client-secret | shh                                   |
     When isaac is run with "config validate"
-    Then the stderr does not contain "pubsub.credentials-file"
+    Then the exit code is 0
+    And the stderr does not contain "pubsub.credentials-file"
