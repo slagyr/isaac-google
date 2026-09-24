@@ -2,16 +2,16 @@
   (:require
     [isaac.google.config :as sut]
     [isaac.schema.lexicon :as lexicon]
-    [speclj.core :refer [context describe it should-contain should-not-contain should=]]))
+    [speclj.core :refer [context describe it should-be-nil should-contain should-not-contain should=]]))
 
 (defn- oauth-field [k]
   (get-in sut/google-schema [:value-spec :schema :oauth :schema k]))
 
-(def tenant-fields #{:project :topic :oauth :pubsub :push :renew-within-hours :health})
+(def tenant-fields #{:project :topic :oauth :push :renew-within-hours :health})
 
 (describe "isaac.google config schema"
 
-  (it "exposes one organization's table with :project :topic :oauth :pubsub :push :renew-within-hours :health"
+  (it "exposes one organization's table with :project :topic :oauth :push :renew-within-hours :health"
     (should= tenant-fields (set (keys (get-in sut/google-schema [:value-spec :schema])))))
 
   (it "requires client-id"
@@ -37,26 +37,34 @@
     (should= #{:silent-after-hours :heartbeat}
              (set (keys (get-in sut/google-schema [:value-spec :schema :health :schema])))))
 
-  (it "declares the heartbeat's switch and deadline"
-    (should= :boolean (get-in sut/google-schema [:value-spec :schema :health :schema :heartbeat :schema :enabled :type]))
-    (should= :int (get-in sut/google-schema [:value-spec :schema :health :schema :heartbeat :schema :deadline-ms :type])))
+  ;; Naming the interval is what turns the watch on, and it is the only thing
+  ;; that can say what late means — so there is no separate switch to leave on
+  ;; over a heartbeat nothing defines (isaac-clly).
+  (it "declares the expected interval and its grace, and nothing else"
+    (should= #{:expected-interval-ms :grace-ms :enabled}
+             (set (keys (get-in sut/google-schema [:value-spec :schema :health :schema :heartbeat :schema]))))
+    (should= :int (get-in sut/google-schema [:value-spec :schema :health :schema :heartbeat :schema :expected-interval-ms :type]))
+    (should= :int (get-in sut/google-schema [:value-spec :schema :health :schema :heartbeat :schema :grace-ms :type])))
+
+  ;; An operator who had it on is told what replaced it, rather than having
+  ;; the key read as an unknown-key warning and the watch stay dark.
+  (it "retires the enabled switch, naming the key that replaced it"
+    (let [enabled (get-in sut/google-schema [:value-spec :schema :health :schema :heartbeat :schema :enabled])]
+      (should-contain :retired? (flatten (:validations enabled)))
+      (should-contain "expected-interval-ms" (str (:validations enabled)))))
+
+  (it "declares no deadline — there is no send to be late from"
+    (should-be-nil (get-in sut/google-schema [:value-spec :schema :health :schema :heartbeat :schema :deadline-ms])))
 
   (it "declares push endpoint and service-account"
     (should= :string (get-in sut/google-schema [:value-spec :schema :push :schema :endpoint :type]))
     (should= :string (get-in sut/google-schema [:value-spec :schema :push :schema :service-account :type])))
 
-  ;; Publishing is machine work. It gets an identity of its own — a key named
-  ;; by path, kept out of the config file like any other secret (isaac-286x).
-  (it "declares where the Pub/Sub service-account key lives"
-    (should= :string (get-in sut/google-schema [:value-spec :schema :pubsub :schema :credentials-file :type]))
-    (should-contain "service-account JSON key"
-                    (get-in sut/google-schema [:value-spec :schema :pubsub :schema :credentials-file :description])))
-
-  ;; It is a secret: the schema says to keep it out of the config file, the
-  ;; same thing oauth.client-secret says.
-  (it "keeps no service-account key in the config itself"
-    (should= #{:credentials-file}
-             (set (keys (get-in sut/google-schema [:value-spec :schema :pubsub :schema])))))
+  ;; Isaac publishes nothing, so it names no publishing identity. Cloud
+  ;; Scheduler publishes the heartbeat as a Google APIs service account inside
+  ;; GCP, and there is no key anywhere to configure (isaac-clly).
+  (it "declares no Pub/Sub publishing credential at all"
+    (should-be-nil (get-in sut/google-schema [:value-spec :schema :pubsub])))
 
   (context "one shape: organization id -> that organization's config (isaac-okfj)"
 

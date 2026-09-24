@@ -10,6 +10,17 @@
 (def config
   {:google {:tonotop {:health {:silent-after-hours 6}}}})
 
+(def watching-tenant
+  "An organization that expects a heartbeat every hour. Naming the interval is
+   what turns the watch on: nothing else could say what late means."
+  {:health {:heartbeat {:expected-interval-ms 3600000}}})
+
+(def watching
+  {:google {:tonotop watching-tenant}})
+
+(defn- heartbeat-errors [config]
+  (:errors (sut/check-heartbeat {:config config})))
+
 (defn- evaluate [opts]
   (sut/evaluate (merge {:now now :config config} opts)))
 
@@ -75,8 +86,7 @@
 
     (it "is silent when neither an event nor a heartbeat has arrived inside the threshold"
       (should= [{:kind :silent :tenant :tonotop :silent-hours 8}]
-               (evaluate {:config  {:google {:tonotop {:health {:silent-after-hours 6
-                                                                :heartbeat {:enabled false}}}}}
+               (evaluate {:config  {:google {:tonotop {:health {:silent-after-hours 6}}}}
                           :tenants [{:tenant :tonotop :keys ["spaces/ENG"]}]
                           :state   {:last-event-at     {"spaces/ENG" "2026-09-14T04:00:00Z"}
                                     :last-heartbeat-at {:tonotop "2026-09-18T04:00:00Z"}
@@ -110,64 +120,98 @@
                           :state   {:last-event-at {"spaces/ENG" "2026-09-18T11:30:00Z"}}
                           :remote  {"spaces/ENG" {:expires-at "2026-09-25T12:00:00Z"}}}))))
 
-  (context "the synthetic heartbeat (isaac-an14)"
+  (context "the heartbeat, published from outside Isaac (isaac-clly)"
 
-    (it "is missed when the published heartbeat is older than the deadline and nothing arrived"
-      (should= [{:kind :heartbeat-missed :tenant :tonotop :deadline-ms 60000}]
-               (evaluate {:tenants [{:tenant :tonotop :keys []}]
-                          :state   {:heartbeat-sent-at {:tonotop "2026-09-18T11:58:00Z"}
-                                    :door-last-hit     "2026-09-18T11:00:00Z"}
-                          :remote  {}})))
+    ;; Isaac publishes nothing. Cloud Scheduler does, on a schedule, as a
+    ;; Google APIs service account inside GCP — so there is no send to pair an
+    ;; arrival with, and the only evidence is arrival recency against the
+    ;; interval the organization says to expect one on.
 
-    (it "is not missed while the heartbeat is still inside the deadline"
+    (it "is quiet while a heartbeat has arrived inside the interval"
       (should= []
-               (evaluate {:now     (Instant/parse "2026-09-18T11:58:30Z")
+               (evaluate {:config  watching
                           :tenants [{:tenant :tonotop :keys []}]
-                          :state   {:heartbeat-sent-at {:tonotop "2026-09-18T11:58:00Z"}
+                          :state   {:last-heartbeat-at {:tonotop "2026-09-18T11:30:00Z"}
                                     :door-last-hit     "2026-09-18T11:00:00Z"}
                           :remote  {}})))
 
-    (it "is not missed when the heartbeat arrived after it was published"
+    (it "is quiet while the last arrival is inside the interval plus grace"
       (should= []
-               (evaluate {:tenants [{:tenant :tonotop :keys []}]
-                          :state   {:heartbeat-sent-at {:tonotop "2026-09-18T11:58:00Z"}
-                                    :last-heartbeat-at {:tonotop "2026-09-18T11:58:02Z"}
+               (evaluate {:config  watching
+                          :tenants [{:tenant :tonotop :keys []}]
+                          :state   {:last-heartbeat-at {:tonotop "2026-09-18T10:59:30Z"}
                                     :door-last-hit     "2026-09-18T11:00:00Z"}
                           :remote  {}})))
 
-    (it "is missed again when a later heartbeat goes unanswered"
-      (should= [{:kind :heartbeat-missed :tenant :tonotop :deadline-ms 60000}]
-               (evaluate {:tenants [{:tenant :tonotop :keys []}]
-                          :state   {:heartbeat-sent-at {:tonotop "2026-09-18T11:58:00Z"}
-                                    :last-heartbeat-at {:tonotop "2026-09-18T10:00:00Z"}
+    (it "is missed once nothing has arrived for the interval plus grace"
+      (should= [{:kind :heartbeat-missed :tenant :tonotop :deadline-ms 3660000}]
+               (evaluate {:config  watching
+                          :tenants [{:tenant :tonotop :keys []}]
+                          :state   {:last-heartbeat-at {:tonotop "2026-09-18T10:55:00Z"}
                                     :door-last-hit     "2026-09-18T11:00:00Z"}
                           :remote  {}})))
 
-    (it "says nothing before the first heartbeat is published"
+    ;; The regression this bean exists for. Paired against a send there was no
+    ;; send, so elapsed was nil and the condition never fired: a watchdog that
+    ;; read as enabled and could not bark. Never having seen one is the same
+    ;; pipeline failure as having stopped seeing them.
+    (it "is missed for an organization that has never seen a heartbeat at all"
+      (should= [{:kind :heartbeat-missed :tenant :tonotop :deadline-ms 3660000}]
+               (evaluate {:config  watching
+                          :tenants [{:tenant :tonotop :keys []}]
+                          :state   {:door-last-hit "2026-09-18T11:00:00Z"}
+                          :remote  {}})))
+
+    (it "honors an organization's own grace"
+      (should= []
+               (evaluate {:config  {:google {:tonotop {:health {:heartbeat {:expected-interval-ms 3600000
+                                                                           :grace-ms             600000}}}}}
+                          :tenants [{:tenant :tonotop :keys []}]
+                          :state   {:last-heartbeat-at {:tonotop "2026-09-18T10:55:00Z"}
+                                    :door-last-hit     "2026-09-18T11:00:00Z"}
+                          :remote  {}})))
+
+    (it "says nothing about an organization that watches for no heartbeat"
       (should= []
                (evaluate {:tenants [{:tenant :tonotop :keys []}]
                           :state   {:door-last-hit "2026-09-18T11:00:00Z"}
                           :remote  {}})))
 
-    (it "says nothing for an organization that turned the heartbeat off"
-      (should= []
-               (evaluate {:config  {:google {:tonotop {:health {:heartbeat {:enabled false}}}}}
-                          :tenants [{:tenant :tonotop :keys []}]
-                          :state   {:heartbeat-sent-at {:tonotop "2026-09-18T10:00:00Z"}
-                                    :door-last-hit     "2026-09-18T11:00:00Z"}
-                          :remote  {}})))
+    (it "watches only once an interval names what late means"
+      (should-not (sut/heartbeat-watched? {:google {:tonotop {}}} :tonotop))
+      (should (sut/heartbeat-watched? watching :tonotop)))
 
-    (it "honors an organization's own deadline"
-      (should= []
-               (evaluate {:config  {:google {:tonotop {:health {:heartbeat {:deadline-ms 600000}}}}}
-                          :tenants [{:tenant :tonotop :keys []}]
-                          :state   {:heartbeat-sent-at {:tonotop "2026-09-18T11:58:00Z"}
-                                    :door-last-hit     "2026-09-18T11:00:00Z"}
-                          :remote  {}})))
+    (it "budgets the interval plus a 60s default grace"
+      (should= 3660000 (sut/heartbeat-budget-ms watching :tonotop))))
 
-    (it "is on unless an organization says otherwise, at a 60s deadline"
-      (should (sut/heartbeat-enabled? {:google {:tonotop {}}} :tonotop))
-      (should= 60000 (sut/heartbeat-deadline-ms {:google {:tonotop {}}} :tonotop))))
+  ;; There is exactly one way to be half-configured — an interval nobody set —
+  ;; and it is the one shape that would read as watched and never fire. The
+  ;; loader refuses it rather than starting a host with an inert watchdog
+  ;; (isaac-clly).
+  (context "refusing a heartbeat that could not fire (isaac-clly)"
+
+    (it "passes an organization that watches for no heartbeat"
+      (should= [] (heartbeat-errors {:google {:tonotop {:topic "projects/marigold/topics/isaac"}}})))
+
+    (it "passes an organization that names its interval"
+      (should= [] (heartbeat-errors watching)))
+
+    (it "refuses a heartbeat configured with no interval"
+      (let [errors (heartbeat-errors {:google {:tonotop {:health {:heartbeat {:grace-ms 60000}}}}})]
+        (should= 1 (count errors))
+        (should= "google.tonotop.health.heartbeat.expected-interval-ms" (:key (first errors)))
+        (should-contain "no interval" (:value (first errors)))))
+
+    (it "refuses an interval that is not a positive number of milliseconds"
+      (let [errors (heartbeat-errors {:google {:tonotop {:health {:heartbeat {:expected-interval-ms 0}}}}})]
+        (should= 1 (count errors))
+        (should-contain "positive" (:value (first errors)))))
+
+    (it "names each organization that is half-configured"
+      (should= ["google.acme.health.heartbeat.expected-interval-ms"]
+               (mapv :key (heartbeat-errors
+                            {:google {:tonotop watching-tenant
+                                      :acme    {:health {:heartbeat {:grace-ms 1000}}}}})))))
 
   (context "notification state"
 

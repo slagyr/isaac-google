@@ -14,12 +14,10 @@
     [isaac.google.events :as google-events]
     [isaac.google.handler :as google-handler]
     [isaac.google.health :as google-health]
-    [isaac.google.heartbeat :as google-heartbeat]
     [isaac.google.inbox :as google-inbox]
     [isaac.google.logins :as logins]
     [isaac.google.people :as google-people]
     [isaac.google.registration :as google-registration]
-    [isaac.google.service-account :as service-account]
     [isaac.google.tenants :as tenants]
     [isaac.google.token :as google-token]
     [isaac.google.worker :as google-worker]
@@ -35,7 +33,6 @@
     [isaac.nexus :as nexus])
   (:import
     (java.net URLDecoder URLEncoder)
-    (java.security KeyPairGenerator)
     (java.util Base64)))
 
 (helper! isaac.google-steps)
@@ -52,7 +49,6 @@
 (def ^:private original-events-request* (atom nil))
 
 (declare restore-people-stub!)
-(declare stub-sa-exchange!)
 
 (g/after-scenario
   (fn []
@@ -61,7 +57,6 @@
     (reset! people-state* default-people-state)
     (restore-people-stub!)
     (google-people/reset-memo!)
-    (service-account/reset-tokens!)
     (google-registration/reset-registrations!)))
 
 (defn- feature-fs []
@@ -636,9 +631,8 @@
         fs*  (feature-fs)
         root (feature-root)]
     (nexus/-with-nested-nexus {:fs fs* :root root}
-      (with-redefs [google-events/request!      stub-events-request!
-                    service-account/exchange! stub-sa-exchange!
-                    memory/now                (constantly now)]
+      (with-redefs [google-events/request! stub-events-request!
+                    memory/now           (constantly now)]
         (binding [memory/*now* now]
           (google-registration/tick! {:now      now
                                       :root     root
@@ -665,8 +659,7 @@
 
 (fcli/register-isaac-run-wrapper!
   (fn [thunk]
-    (with-redefs [google-events/request!      stub-events-request!
-                  service-account/exchange!   stub-sa-exchange!]
+    (with-redefs [google-events/request! stub-events-request!]
       (thunk))))
 
 (defgiven "the Workspace Events API has no subscriptions"
@@ -694,33 +687,17 @@
   isaac.google-steps/last-google-event-was-at)
 
 (defn google-heartbeat-arrived
-  "What the door does when the tick's own synthetic message comes back: it
+  "What the door does when the externally-published heartbeat arrives: it
    records the heartbeat, and nothing else — a heartbeat is not an event
-   (isaac-an14)."
+   (isaac-an14, isaac-clly)."
   [tenant ts]
   (let [fs*  (feature-fs)
         root (feature-root)]
     (nexus/-with-nested-nexus {:fs fs* :root root}
       (google-health/record-heartbeat! root (keyword tenant) ts))))
 
-(defn heartbeat-published-to
-  "Exactly one heartbeat left for this topic: a real Pub/Sub publish, marked
-   so the door can tell it from Chat traffic."
-  [topic]
-  (let [url  (str "https://pubsub.googleapis.com/v1/" topic ":publish")
-        reqs (or (g/get :outbound-http-requests) [])
-        hits (filter (fn [r]
-                       (and (= url (:url r))
-                            (= google-heartbeat/CE-TYPE
-                               (get-in r [:body :messages 0 :attributes "ce-type"]))))
-                     reqs)]
-    (g/should= 1 (count hits))))
-
 (defwhen #"a Google heartbeat for \"([^\"]+)\" arrived at \"([^\"]+)\""
   isaac.google-steps/google-heartbeat-arrived)
-
-(defthen #"a Google heartbeat was published to \"([^\"]+)\""
-  isaac.google-steps/heartbeat-published-to)
 
 (defwhen "the test clock advances {n:int} milliseconds"
   isaac.google-steps/test-clock-advances)
@@ -966,83 +943,6 @@
 (defthen "the response body contains {text:string}"
   isaac.google-steps/response-body-contains)
 
-
-;; region ----- the Pub/Sub service account (isaac-286x) -----
-;;
-;; Publishing is machine work. Asking a person to consent to `auth/pubsub` —
-;; a Cloud Platform scope — put the whole Google grant under the Workspace's
-;; Cloud reauthentication clock and killed yopp's refresh token every ~15
-;; hours (isaac-ey6q). So the key is real here: the scenario writes a genuine
-;; RSA service-account key and the module reads it, signs with it and caches
-;; what it gets back. Only Google's token endpoint is stubbed.
-
-(def ^:private SA-EMAIL "isaac-pubsub@marigold.iam.gserviceaccount.com")
-
-(def ^:private SA-TOKEN "sa-at-1")
-
-(defn- service-account-key-json []
-  (let [pair (.generateKeyPair (doto (KeyPairGenerator/getInstance "RSA") (.initialize 2048)))
-        pem  (str "-----BEGIN PRIVATE KEY-----\n"
-                  (.encodeToString (Base64/getMimeEncoder 64 (.getBytes "\n" "UTF-8"))
-                                   (.getEncoded (.getPrivate pair)))
-                  "\n-----END PRIVATE KEY-----\n")]
-    (json/generate-string {:type           "service_account"
-                           :project_id     "marigold"
-                           :private_key_id "pk-1"
-                           :private_key    pem
-                           :client_email   SA-EMAIL
-                           :token_uri      service-account/TOKEN-URL})))
-
-(defn pubsub-service-account-key
-  "Write the service-account key file an organization's config names, under
-   the Isaac root."
-  [path]
-  (let [fs*  (feature-fs)
-        full (str (feature-root) "/" path)]
-    (fs/mkdirs fs* (fs/parent full))
-    (fs/spit fs* full (service-account-key-json))
-    (service-account/reset-tokens!)))
-
-(defn- stub-sa-exchange!
-  "Google's token endpoint, answering the signed assertion. The assertion
-   itself was built and signed for real by isaac.google.service-account."
-  [_token-uri assertion]
-  (g/update! :sa-assertions (fn [prior] (vec (conj (or prior []) assertion))))
-  {:access_token SA-TOKEN :expires_in 3600})
-
-(defn publish-carried-service-account-token
-  "The publish went out as the service account. Named against the user's own
-   token too, because the whole point is that it is not that one."
-  [topic]
-  (let [url  (str "https://pubsub.googleapis.com/v1/" topic ":publish")
-        hits (filter #(= url (:url %)) (or (g/get :outbound-http-requests) []))]
-    (g/should (seq hits))
-    (doseq [hit hits]
-      (g/should= (str "Bearer " SA-TOKEN) (get-in hit [:headers "Authorization"])))))
-
-(defn assertion-asked-for-scope
-  "What the signed assertion asked Google for: the Pub/Sub scope, and it is
-   the service account asking, not a person."
-  [scope]
-  (let [assertion (last (or (g/get :sa-assertions) []))
-        claims    (-> (str assertion)
-                      (str/split #"\.")
-                      second
-                      (as-> segment (String. (.decode (Base64/getUrlDecoder) ^String segment) "UTF-8"))
-                      (json/parse-string true))]
-    (g/should= scope (:scope claims))
-    (g/should= SA-EMAIL (:iss claims))))
-
-(defgiven #"a Pub/Sub service-account key at \"([^\"]+)\""
-  isaac.google-steps/pubsub-service-account-key)
-
-(defthen #"the Pub/Sub publish to \"([^\"]+)\" carried the service account's token"
-  isaac.google-steps/publish-carried-service-account-token)
-
-(defthen #"the service account asked Google only for \"([^\"]+)\""
-  isaac.google-steps/assertion-asked-for-scope)
-
-;; endregion
 
 (defn consent-scopes
   "The scopes the authorization URL the login printed actually asks for."

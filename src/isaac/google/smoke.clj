@@ -9,8 +9,8 @@
    Every `decide-*` fn below is pure — an evidence map in, a
    `{:check :status :evidence}` verdict out — so it is spec'd with fixtures
    and no network (spec/isaac/google/smoke_spec.clj). Gathering the evidence
-   (the door probe, the live Pub/Sub publish, reading registration/inbox/
-   health state) is the untestable half; it lives in isaac.google.cli, which
+   (the door probe, reading registration/inbox/health state) is the
+   untestable half; it lives in isaac.google.cli, which
    calls these fns and prints their verdicts. See doc/rollout.md for the
    defect → check mapping and how to run it."
   (:require
@@ -20,16 +20,21 @@
 (def DEFAULT-INBOX-THRESHOLD 0)
 (def DEFAULT-SILENT-THRESHOLD 0)
 (def DOOR-PATH "/google/pubsub")
-(def PROBE-TYPE "isaac.google.smoke/probe")
 
-(defn noop-handler
-  "The smoke probe's own handler: `--send-live` publishes one real message of
-   this ce-type so `decide-live-push` can prove it reached the inbox. With no
-   handler it would sit in pending/ forever, or now, in unhandled/ with a
-   warning on every host it ran against — a probe should leave nothing behind
-   (isaac-pl8x)."
-  [_event]
-  nil)
+(def SEND-LIVE-RETIRED
+  "What `--send-live` says now. Publishing is no longer Isaac's job, so this
+   command has nothing to publish — and the check it used to run is being run
+   continuously by something better. A Cloud Scheduler job publishes the
+   heartbeat to the topic as a Google APIs service account inside GCP: no
+   exported key (which the organization's policy refuses to issue anyway), on
+   a schedule rather than when somebody remembers, and originating outside
+   the process under test. Its arrival is the same end-to-end proof — door,
+   OIDC verification, inbox — and the `silent` check above reads it
+   (isaac-clly)."
+  (str "--send-live is retired: publishing is no longer Isaac's job. "
+       "A Cloud Scheduler job publishes the heartbeat to the topic, and the "
+       "silent check above fails when it stops arriving — the same end-to-end "
+       "proof, run every interval instead of by hand. See doc/rollout.md."))
 
 ;; ---- verdicts -----------------------------------------------------------
 
@@ -155,9 +160,11 @@
 
    Two conditions count: an organization with no event from Google inside its
    `silent-after-hours` (per tenant, not per key — a quiet space is normal),
-   and a synthetic heartbeat that never came back through the door. The
-   second is the one that still speaks on a host nobody has messaged all day
-   (isaac-an14)."
+   and a heartbeat that has not arrived inside the interval the organization
+   expects one on. The second is the one that still speaks on a host nobody
+   has messaged all day, and — since Cloud Scheduler publishes it, not Isaac
+   — the one that took over what `--send-live` used to prove by hand
+   (isaac-an14, isaac-clly)."
   [{:keys [conditions threshold]}]
   (let [threshold (or threshold DEFAULT-SILENT-THRESHOLD)
         silent    (filter #(#{:silent :heartbeat-missed} (:kind %)) conditions)
@@ -166,29 +173,8 @@
       (pass :silent (str n " silent condition(s), threshold " threshold))
       (fail :silent (str/join "; " (map silent-evidence silent))))))
 
-;; ---- live push (optional, --send-live): one real message published to
-;;      the real Pub/Sub topic, proving the door, its OIDC verification
-;;      (isaac-4sqh — the reflective key construction that once did not
-;;      exist under bb), and inbox/accept! all ran against a genuine
-;;      Google-signed push, not a stub -------------------------------------
-
-(defn decide-live-push
-  "PASS when the test message this run published to the real Pub/Sub topic
-   reached the inbox before the wait timed out. Reaching the inbox at all —
-   :pending, :done, or :failed — is the proof: it means the push arrived,
-   Google's token was verified, and `inbox/accept!` ran. Which module drains
-   it onto a handler afterward is a separate concern the `inbox` check above
-   already covers as backlog."
-  [{:keys [publish-error message-id arrived? arrived-as]}]
-  (cond
-    publish-error
-    (fail :live-push (str "could not publish the test message: " publish-error))
-
-    (nil? message-id)
-    (fail :live-push "Pub/Sub publish returned no messageId")
-
-    (not arrived?)
-    (fail :live-push (str "message " message-id " never reached the inbox before the wait timed out"))
-
-    :else
-    (pass :live-push (str "message " message-id " reached inbox/" (name arrived-as)))))
+;; ---- live push: gone. Isaac publishes nothing, so `smoke` has nothing to
+;;      publish. The heartbeat Cloud Scheduler publishes is the same proof —
+;;      a real Google-signed push through the real door into the real inbox —
+;;      and `silent` above is the check that reads it (isaac-clly, retiring
+;;      isaac-mu1i's --send-live and isaac-pl8x's probe handler).

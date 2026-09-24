@@ -1,7 +1,11 @@
 (ns isaac.google.health
   "Health evaluation, attention throttle, status table, and health.edn state.
 
-   Health is a heartbeat, not a chatter monitor. Silence is judged once per
+   Health is a heartbeat, not a chatter monitor. Isaac does not publish that
+   heartbeat — a Cloud Scheduler job does, on the organization's own topic,
+   as a Google APIs service account inside GCP — so the watch is arrival
+   recency against the interval the operator says to expect one on, never a
+   send paired with an arrival (isaac-clly). Silence is judged once per
    Google organization — \"nothing at all from this tenant in
    `silent-after-hours`\" — because a quiet space is normal and a quiet
    *organization* is not. It is judged over every key the health state has
@@ -14,6 +18,7 @@
   (:require
     [clojure.edn :as edn]
     [clojure.pprint :as pprint]
+    [clojure.string :as str]
     [isaac.comm.delivery.queue :as queue]
     [isaac.fs :as fs]
     [isaac.google.tenants :as tenants]
@@ -22,7 +27,12 @@
   (:import (java.time Duration Instant)))
 
 (def DEFAULT-SILENT-HOURS 6)
-(def DEFAULT-HEARTBEAT-DEADLINE-MS 60000)
+
+(def DEFAULT-HEARTBEAT-GRACE-MS
+  "Slack past the moment a heartbeat was due before it counts as missed:
+   scheduler jitter plus Pub/Sub delivery. One minute, the deadline a
+   self-published heartbeat used to get to reach the door."
+  60000)
 
 (defn- runtime-fs []
   (or (fs/instance) (nexus/get :fs) (fs/real-fs)))
@@ -79,17 +89,90 @@
   [config id]
   (as-long (:silent-after-hours (tenant-health config id)) DEFAULT-SILENT-HOURS))
 
-(defn heartbeat-enabled?
-  "Does this organization get a synthetic heartbeat? On unless it says no —
-   the heartbeat is what proves the push pipeline when nobody is talking."
-  [config id]
-  (not (false? (get-in (tenant-health config id) [:heartbeat :enabled]))))
+(defn heartbeat-interval-ms
+  "How often this organization's heartbeat is published — by Cloud Scheduler,
+   not by Isaac. nil when nobody named an interval, which is also how an
+   organization says it watches for no heartbeat at all.
 
-(defn heartbeat-deadline-ms
-  "How long a published heartbeat has to reach the door."
+   There is deliberately no default. A heartbeat Isaac publishes can be timed
+   from the publish; one published outside can only be timed against what the
+   operator says to expect, so a guess here would be a watchdog barking at a
+   schedule nobody runs — or, worse, not barking (isaac-clly)."
   [config id]
-  (as-long (get-in (tenant-health config id) [:heartbeat :deadline-ms])
-           DEFAULT-HEARTBEAT-DEADLINE-MS))
+  (let [ms (as-long (get-in (tenant-health config id) [:heartbeat :expected-interval-ms]) nil)]
+    (when (and ms (pos? ms)) ms)))
+
+(defn heartbeat-grace-ms
+  "Slack past the expected arrival before this organization calls it missed."
+  [config id]
+  (as-long (get-in (tenant-health config id) [:heartbeat :grace-ms])
+           DEFAULT-HEARTBEAT-GRACE-MS))
+
+(defn heartbeat-watched?
+  "Does this organization watch for a heartbeat? Naming the interval is what
+   turns the watch on — there is no separate switch, because a switch that
+   could be on over an interval nobody set is exactly the inert watchdog this
+   whole arrangement exists to make impossible (isaac-clly)."
+  [config id]
+  (some? (heartbeat-interval-ms config id)))
+
+(defn heartbeat-budget-ms
+  "How long this organization may go with no heartbeat arriving: the interval
+   it expects one on, plus grace.
+
+   An organization that named no interval is a config error the loader
+   refuses (`check-heartbeat`). Should one reach here anyway the budget is
+   the grace alone, so the watch fires early rather than falling silent —
+   between the two mistakes, only one of them is quiet."
+  [config id]
+  (+ (or (heartbeat-interval-ms config id) 0)
+     (heartbeat-grace-ms config id)))
+
+;; region ----- the config check -----
+
+(def INTERVAL-KEY-LEAF ["health" "heartbeat" "expected-interval-ms"])
+
+(defn heartbeat-interval-key
+  "The config key an operator sets to say how often `id`'s heartbeat is
+   published."
+  [config id]
+  (str/join "." (concat (map name (tenants/config-path config (or id :<organization>)))
+                        INTERVAL-KEY-LEAF)))
+
+(def MISSING-INTERVAL-REASON
+  "names no interval: the heartbeat is published from outside Isaac (a Cloud Scheduler job on the topic), so only the schedule it runs on can say what late means — set it, or configure no heartbeat at all (isaac-clly)")
+
+(def BAD-INTERVAL-REASON
+  "must be a positive number of milliseconds — the interval the external publisher's schedule runs on")
+
+(defn check-heartbeat
+  "An organization that configured a heartbeat must say how often to expect
+   one. Half-configured, the watch would read as set up and never fire: with
+   no interval there is nothing to be late against, and an arrival watch with
+   no deadline is an inert watchdog wearing a healthy face.
+
+   This is the same refusal isaac-286x made of a missing service-account key,
+   pointed at what the heartbeat actually needs now. The key is gone — Cloud
+   Scheduler publishes as a Google APIs service account inside GCP, so there
+   is no credential to name and nothing for
+   `constraints/iam.disableServiceAccountKeyCreation` to refuse. What is left
+   to get wrong is the interval, so that is what the loader checks."
+  [{:keys [config]}]
+  {:errors
+   (vec
+     (keep (fn [[id tenant]]
+             (let [heartbeat (get-in tenant [:health :heartbeat])]
+               (cond
+                 (heartbeat-watched? config id) nil
+
+                 (some? (:expected-interval-ms heartbeat))
+                 {:key (heartbeat-interval-key config id) :value BAD-INTERVAL-REASON}
+
+                 (and (map? heartbeat) (seq heartbeat))
+                 {:key (heartbeat-interval-key config id) :value MISSING-INTERVAL-REASON})))
+           (sort-by key (tenants/tenants config))))})
+
+;; endregion
 
 (defn- expired? [now expires-at]
   (let [now (->instant now)
@@ -132,19 +215,31 @@
       [{:kind :silent :tenant tenant :silent-hours hours}])))
 
 (defn- heartbeat-conditions
-  "A heartbeat published `deadline-ms` ago that never came back through the
-   door is the pipeline failing where no chat traffic would show it."
+  "Nothing has arrived from the organization's heartbeat for longer than it
+   expects between them. That is the pipeline failing where no chat traffic
+   would show it.
+
+   The publisher is outside Isaac — a Cloud Scheduler job on the topic — so
+   the only evidence is arrival recency. This used to pair a send with an
+   arrival, and the moment Isaac stopped publishing there was no send: no
+   `:heartbeat-sent-at`, no elapsed, and a condition that could not fire
+   while the config still read as enabled. A health check that cannot fail
+   is not a health check (isaac-clly).
+
+   An organization that has never seen one is missed, not unknown: silence
+   from the start is the same pipeline failure as silence after a year, and
+   a topic that was never wired up is precisely the case a first-arrival
+   grace period would hide forever. A host that has only just booted is
+   covered by `:door-unreached`, which suppresses this."
   [now config state tenant]
-  (when (heartbeat-enabled? config tenant)
-    (let [sent    (->instant (get-in state [:heartbeat-sent-at tenant]))
+  (when (heartbeat-watched? config tenant)
+    (let [budget  (heartbeat-budget-ms config tenant)
           arrived (->instant (get-in state [:last-heartbeat-at tenant]))
-          elapsed (millis-between sent (->instant now))]
-      (when (and elapsed
-                 (>= elapsed (heartbeat-deadline-ms config tenant))
-                 (or (nil? arrived) (.isBefore arrived sent)))
+          elapsed (millis-between arrived (->instant now))]
+      (when (or (nil? arrived) (and elapsed (>= elapsed budget)))
         [{:kind        :heartbeat-missed
           :tenant      tenant
-          :deadline-ms (heartbeat-deadline-ms config tenant)}]))))
+          :deadline-ms budget}]))))
 
 (defn evaluate
   "Pure: state + now + config → vector of failing conditions.
@@ -247,17 +342,13 @@
     (save-state! root next)))
 
 (defn record-heartbeat!
-  "A synthetic heartbeat came back through the door. It is deliberately not
+  "A heartbeat arrived at the door. It is deliberately not
    a `last-event`: nobody spoke, so it never appears in the status table's
    last-event column and never starts anything. It does count as having
    heard from the organization — see `last-seen-for` (isaac-an14)."
   [root tenant at]
   (let [state (load-state root)]
     (save-state! root (assoc-in state [:last-heartbeat-at tenant] (iso at)))))
-
-(defn record-heartbeat-sent! [root tenant at]
-  (let [state (load-state root)]
-    (save-state! root (assoc-in state [:heartbeat-sent-at tenant] (iso at)))))
 
 (defn- present-ids [conditions]
   (set (map condition-id conditions)))

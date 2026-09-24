@@ -47,11 +47,16 @@
       (should-not-contain "auth/pubsub" scope)
       (should-not-contain "cloud-platform" scope)))
 
-  ;; Absent, the host starts, validates OK, and only says so an hour later
-  ;; when the first heartbeat cannot be published (isaac-286x).
-  (it "contributes a config check for the Pub/Sub service account"
-    (should= 'isaac.google.service-account/check-credentials
-             (get-in manifest [:isaac.config/check :google-pubsub-credentials :fn])))
+  ;; The demand that used to be a service-account key is now an interval:
+  ;; a heartbeat configured without one would read as watched and never fire,
+  ;; so the loader refuses it rather than starting an inert watchdog
+  ;; (isaac-clly, replacing isaac-286x's credentials check).
+  (it "contributes a config check for the heartbeat it watches"
+    (should= 'isaac.google.health/check-heartbeat
+             (get-in manifest [:isaac.config/check :google-heartbeat :fn])))
+
+  (it "contributes no Pub/Sub credentials check — nothing here publishes"
+    (should-be-nil (get-in manifest [:isaac.config/check :google-pubsub-credentials])))
 
   (it "declares the registration berth"
     (should= :map (get-in manifest [:berths :isaac.google/registration :schema :type]))
@@ -72,9 +77,9 @@
   (it "contributes the registration timer component"
     (should= 'isaac.google.component (get-in manifest [:isaac/component :google-registration :namespace])))
 
-  ;; The smoke probe needs a handler of its own or `--send-live` leaves a
-  ;; record behind that the worker warns about forever (isaac-pl8x).
-  (it "contributes a no-op handler for its own smoke probe type"
-    (should= 'isaac.google.smoke/noop-handler
-             (get-in manifest [:isaac.google/handler "isaac.google.smoke/probe"])))
+  ;; The smoke probe's own handler went with the publish that produced its
+  ;; records: `--send-live` no longer publishes anything, so nothing of that
+  ;; ce-type can arrive (isaac-clly, retiring isaac-pl8x's parking handler).
+  (it "contributes no handler of its own"
+    (should-be-nil (:isaac.google/handler manifest)))
   )

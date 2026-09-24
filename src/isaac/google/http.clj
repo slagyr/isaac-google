@@ -71,10 +71,15 @@
     (health/record-last-event! root k now)))
 
 (defn- accept-heartbeat!
-  "The tick's own synthetic message: record that it came back and stop. It
-   is not persisted, so no worker drains it, no handler sees it and no turn
-   starts; and it is not a last-event, so it never quiets the silence watch
-   it exists to complement (isaac-an14)."
+  "The scheduled heartbeat: record that it arrived and stop. It is not
+   persisted, so no worker drains it, no handler sees it and no turn starts;
+   and it is not a last-event, so it never quiets the silence watch it exists
+   to complement (isaac-an14).
+
+   Which organization it belongs to is settled the same way every other push
+   is — the project in the subscription name and the service account that
+   signed the token — never by anything in the body. A publisher outside
+   Isaac cannot name a tenant it has not proved (isaac-clly)."
   [root tenant event now]
   (when root
     (health/record-door-hit! root now)

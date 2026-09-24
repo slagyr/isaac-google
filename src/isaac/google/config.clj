@@ -24,34 +24,31 @@
                  :service-account {:type        :string
                                    :description "Push subscription service account email."}}})
 
-(def pubsub-schema
-  {:name        :google-pubsub
-   :type        :map
-   :description "How Isaac publishes to this organization's topic — as a service account of its own, never as the signed-in person (isaac-286x)."
-   :schema      {:credentials-file {:type        :string
-                                    :description "Path to the service-account JSON key Isaac publishes to this organization's topic with — absolute, or relative to the Isaac root. Required once :topic is set. Keep the key out of the config file; it is a secret, like oauth.client-secret."}}})
-
 (def heartbeat-schema
   {:name        :google-heartbeat
    :type        :map
-   :description "Synthetic Pub/Sub heartbeat: the registration tick publishes one message to this organization's topic and expects it back at the push door."
-   :schema      {:enabled     {:type        :boolean
-                               :description "Publish a heartbeat on every registration tick. Default true."}
-                 :deadline-ms {:type        :int
-                               :description "Milliseconds a published heartbeat has to reach the door before it counts as missed. Default 60000."}}})
+   :description "Pub/Sub heartbeat: a Cloud Scheduler job publishes one message to this organization's topic on a schedule and Isaac watches for it at the push door. Isaac publishes nothing — naming the interval is what turns the watch on."
+   :schema      {:expected-interval-ms {:type        :int
+                                        :description "How often the external publisher (a Cloud Scheduler job on the topic) publishes a heartbeat, in milliseconds. Setting it is what turns the watch on; no heartbeat arriving for this long plus :grace-ms is :heartbeat-missed. No default — only the schedule the publisher runs on can say what late means."}
+                 :grace-ms             {:type        :int
+                                        :description "Milliseconds of slack past the expected arrival — scheduler jitter plus Pub/Sub delivery — before a heartbeat counts as missed. Default 60000."}
+                 :enabled              {:type        :boolean
+                                        :validations [[:retired? "the heartbeat is published from outside Isaac now — set health.heartbeat.expected-interval-ms to the schedule the Cloud Scheduler job publishes on, or unset the heartbeat entirely (isaac-clly)"]]
+                                        :description "Retired. Naming :expected-interval-ms is what turns the watch on; a switch that could be on over an interval nobody set is the inert watchdog this replaced."}}})
 
 (def health-schema
   {:name        :google-health
    :type        :map
-   :description "Health thresholds for one Google organization: how long it may be silent, and its synthetic heartbeat."
+   :description "Health thresholds for one Google organization: how long it may be silent, and the externally-published heartbeat it watches for."
    :schema      {:silent-after-hours {:type        :int
                                       :description "Hours without any event from Google for this organization before it is silent. Default 6."}
                  :heartbeat          heartbeat-schema}})
 
 (def tenant-fields
-  "One Google organization's complete set: its project, topic, the identity
-   it publishes to that topic as, the OAuth client (and so the Google user
-   Isaac signs in as) and its push service account."
+  "One Google organization's complete set: its project, topic, the OAuth
+   client (and so the Google user Isaac signs in as) and its push service
+   account. Nothing here publishes, so nothing here names a publishing
+   identity (isaac-clly)."
   {:project            {:type        :string
                         :description "GCP project id that owns the Pub/Sub topic."}
    :topic              {:type        :string
@@ -60,7 +57,6 @@
                         :description "Hours before expiry at which the registration timer renews a subscription. Default 24."}
    :health             health-schema
    :oauth              oauth-schema
-   :pubsub             pubsub-schema
    :push               push-schema})
 
 (def tenant-schema

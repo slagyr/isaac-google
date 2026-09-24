@@ -12,7 +12,8 @@
    account belongs to\" — a statement about a person, which no service
    account can make for them — and `subscriptions.create` needs no Pub/Sub
    scope to name a topic as its notification endpoint. Only the publishing
-   moved to a service account (isaac.google.pubsub, isaac-286x)."
+   moved off it entirely: Cloud Scheduler publishes the heartbeat now
+   (isaac-286x, isaac-clly)."
   (:require
     [clojure.edn :as edn]
     [clojure.pprint :as pprint]
@@ -22,7 +23,6 @@
     [isaac.fs :as fs]
     [isaac.google.events :as events]
     [isaac.google.health :as health]
-    [isaac.google.heartbeat :as heartbeat]
     [isaac.google.tenants :as tenants]
     [isaac.logger :as log]
     [isaac.module.berths :as berths]
@@ -308,8 +308,11 @@
 
 (defn tick!
   "One reconcile pass on the caller thread, per configured tenant. Also
-   evaluates health, once, over every tenant's keys and remote state, and
-   sends each organization its synthetic heartbeat (isaac-an14)."
+   evaluates health, once, over every tenant's keys and remote state — which
+   includes watching for each organization's heartbeat. The tick no longer
+   publishes one: a Cloud Scheduler job does, on its own schedule, so the
+   probe no longer depends on the very timer it is meant to prove
+   (isaac-an14, isaac-clly)."
   ([] (tick! {}))
   ([{:keys [now root config] :as opts}]
    ;; :door-up? is read from opts explicitly — a destructured local of the
@@ -334,10 +337,8 @@
      (health/log-conditions! conditions h-state)
      (doseq [survey surveys]
        (execute-tenant! root survey))
-     (let [applied (health/apply! {:now        now
-                                   :config     cfg
-                                   :root       root
-                                   :state      h-state
-                                   :conditions conditions})]
-       (heartbeat/send-all! {:root root :config cfg :now now :tenants ids})
-       applied))))
+     (health/apply! {:now        now
+                     :config     cfg
+                     :root       root
+                     :state      h-state
+                     :conditions conditions}))))

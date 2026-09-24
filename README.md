@@ -24,10 +24,16 @@ Part of the Google Workspace comms epic (isaac-bv1l).
 
 - Module (`isaac.google.module/create-module`), manifest id `:isaac.google`.
 - OAuth scopes berth, Pub/Sub handler berth, Workspace Events registration/renewal.
-- Pub/Sub publishing (heartbeat, `smoke --send-live`) authenticates as a service
-  account — `google.<org>.pubsub.credentials-file` — never as the signed-in user:
-  a Cloud Platform scope on a human's grant drags the whole Google login under the
-  Workspace's Cloud reauthentication clock (isaac-286x; see `doc/rollout.md`).
+- Isaac publishes nothing to Pub/Sub. A Cloud Scheduler job publishes the
+  heartbeat to the organization's topic as a Google APIs service account inside
+  GCP — no exported key, so nothing for
+  `constraints/iam.disableServiceAccountKeyCreation` to refuse — and Isaac
+  watches for its arrival against
+  `google.<org>.health.heartbeat.expected-interval-ms` (isaac-clly; the Cloud
+  Scheduler runbook is in `doc/rollout.md`).
+- No Cloud Platform scope rides on the human's login: one there drags the whole
+  Google grant under the Workspace's Cloud reauthentication clock (isaac-ey6q,
+  isaac-286x).
 - Further work is planned in the beans under isaac-bv1l.
 
 ## Development

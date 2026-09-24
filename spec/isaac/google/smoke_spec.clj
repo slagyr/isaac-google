@@ -2,8 +2,8 @@
   "Fixture-only specs for the pass/fail decisions `isaac google smoke` prints.
    Every fn here is pure — evidence map in, a verdict out — so these specs
    never touch a network or a filesystem. The evidence-gathering half (the
-   HTTP probe, the live Pub/Sub publish, the inbox poll) lives in
-   isaac.google.cli and is not spec'd here; it needs a live host."
+   HTTP probe, the inbox read) lives in isaac.google.cli and is not spec'd
+   here; it needs a live host."
   (:require
     [isaac.google.smoke :as sut]
     [speclj.core :refer :all])
@@ -98,12 +98,6 @@
       (should-contain "1 unhandled" (:evidence result))))
   )
 
-(describe "google smoke — probe handler (isaac-pl8x: --send-live leaves nothing behind)"
-
-  (it "does nothing — the worker marks the record done once it returns"
-    (should-be-nil (sut/noop-handler {:message-id "probe-1" :type sut/PROBE-TYPE :data {}})))
-  )
-
 (describe "google smoke — silent (the per-tenant silence and heartbeat watchdogs)"
 
   (it "passes when nothing is firing"
@@ -139,26 +133,21 @@
                                :threshold  0}))))
   )
 
-(describe "google smoke — live push (isaac-4sqh-era OIDC verifier under bb; isaac-6krg tick!)"
+(describe "google smoke — --send-live is retired (isaac-clly)"
 
-  (it "fails when the test message could not be published"
-    (let [result (sut/decide-live-push {:publish-error "403 insufficient scope"})]
-      (should= :fail (:status result))
-      (should-contain "403" (:evidence result))))
+  ;; Publishing is no longer Isaac's job. Cloud Scheduler publishes the
+  ;; heartbeat as a Google APIs service account inside GCP, which is a better
+  ;; live push than this one ever was: it originates outside the process being
+  ;; tested, it runs on a schedule rather than when somebody remembers, and it
+  ;; needs no exported key — the thing `constraints/iam.disableServiceAccount\
+  ;; KeyCreation` refuses to issue. The `silent` check above reads its arrival.
+  (it "says plainly that publishing is not Isaac's job any more"
+    (should-contain "no longer" sut/SEND-LIVE-RETIRED)
+    (should-contain "Cloud Scheduler" sut/SEND-LIVE-RETIRED)
+    (should-contain "silent" sut/SEND-LIVE-RETIRED))
 
-  (it "fails when publish returned no message id"
-    (should= :fail (:status (sut/decide-live-push {:message-id nil}))))
-
-  (it "fails when the message never reached the inbox before the wait timed out"
-    (let [result (sut/decide-live-push {:message-id "9001" :arrived? false})]
-      (should= :fail (:status result))
-      (should-contain "9001" (:evidence result))))
-
-  (it "passes when the message reached the inbox, naming where"
-    (let [result (sut/decide-live-push {:message-id "9001" :arrived? true :arrived-as :pending})]
-      (should= :pass (:status result))
-      (should-contain "9001" (:evidence result))
-      (should-contain "pending" (:evidence result))))
+  (it "decides no live push — there is none to decide"
+    (should-be-nil (resolve 'isaac.google.smoke/decide-live-push)))
   )
 
 (describe "google smoke — rendering and the overall verdict"

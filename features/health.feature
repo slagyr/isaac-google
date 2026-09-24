@@ -13,15 +13,12 @@ Feature: Google health and attention
     And config:
       | log.output                               | memory                         |
       | google.tonotop.topic                             | projects/marigold/topics/isaac |
-      | google.tonotop.pubsub.credentials-file           | google/pubsub-sa.json          |
       | google.tonotop.health.silent-after-hours         | 6                              |
-      | google.tonotop.health.heartbeat.enabled          | false                          |
       | attention.notify.comm                    | discord                        |
       | attention.notify.target                  | boiler-room                    |
       | comms.gchat.gchat/account                | yopp@tonotop.com               |
       | comms.gchat.gchat/spaces.spaces/ENG.name | engineering                    |
     And the google auth store has access "at-1" and refresh "rt-1"
-    And a Pub/Sub service-account key at "google/pubsub-sa.json"
     And the Workspace Events API has subscription "subscriptions/s-eng" for "spaces/ENG" expiring at "2026-09-25T12:00:00Z"
     And the clock is fixed at "2026-09-18T12:00:00Z"
 
@@ -86,21 +83,23 @@ Feature: Google health and attention
       | event                  |
       | :google/health-cleared |
 
-  # The heartbeat is a Pub/Sub publish, and publishing is machine work: it goes
-  # out as the organization's service account, never as the signed-in person
-  # whose token fetches Chat (isaac-286x).
-  Scenario: a heartbeat that never arrives is reported once and cleared when one does
+  # Isaac publishes no heartbeat. Cloud Scheduler does, on a schedule, as a
+  # Google APIs service account inside GCP — no key exists to be issued, which
+  # is what the organization's key policy forbids. So the watch is arrival
+  # recency against the interval the organization says to expect one on, never
+  # a send paired with an arrival: with no send, pairing could not fire at all
+  # (isaac-clly).
+  Scenario: a heartbeat that stops arriving is reported once and cleared when one does
     Given config:
-      | google.tonotop.health.heartbeat.enabled | true |
+      | google.tonotop.health.heartbeat.expected-interval-ms | 3600000 |
     And the last Google event for "spaces/ENG" was at "2026-09-18T11:30:00Z"
+    And a Google heartbeat for "tonotop" arrived at "2026-09-18T11:30:00Z"
     When the google registration timer ticks
-    Then a Google heartbeat was published to "projects/marigold/topics/isaac"
-    And the Pub/Sub publish to "projects/marigold/topics/isaac" carried the service account's token
-    And the service account asked Google only for "https://www.googleapis.com/auth/pubsub"
+    Then no outbound HTTP request to "https://pubsub.googleapis.com/v1/projects/marigold/topics/isaac:publish" was made
     And the log has no entries matching:
       | event                    |
       | :google/heartbeat-missed |
-    When the test clock advances 70000 milliseconds
+    When the test clock advances 3660000 milliseconds
     And the google registration timer ticks
     Then the log has entries matching:
       | level | event                    | tenant   |
@@ -108,17 +107,31 @@ Feature: Google health and attention
     And the only file in "comm/delivery/pending" EDN contains:
       | path    | value                                     |
       | content | contains "tonotop" and "heartbeat missed" |
-    When the test clock advances 70000 milliseconds
+    When the test clock advances 3600000 milliseconds
     And the google registration timer ticks
     Then the log has exactly 1 entries matching:
       | event                    |
       | :google/heartbeat-missed |
-    When a Google heartbeat for "tonotop" arrived at "2026-09-18T12:03:00Z"
-    And the test clock advances 70000 milliseconds
+    When a Google heartbeat for "tonotop" arrived at "2026-09-18T14:00:00Z"
+    And the test clock advances 60000 milliseconds
     And the google registration timer ticks
     Then the log has entries matching:
       | level | event                  | kind              | subject  |
       | :info | :google/health-cleared | :heartbeat-missed | :tonotop |
+
+  # The regression this bean exists for. Judged by pairing a send with an
+  # arrival, an organization nobody publishes for has no send, so the
+  # condition never fired: the config read as enabled and the watchdog could
+  # not bark. Never having seen a heartbeat is the same pipeline failure as
+  # having stopped seeing them (isaac-clly).
+  Scenario: an organization that has never seen a heartbeat reports missed, not nothing
+    Given config:
+      | google.tonotop.health.heartbeat.expected-interval-ms | 3600000 |
+    And the last Google event for "spaces/ENG" was at "2026-09-18T11:30:00Z"
+    When the google registration timer ticks
+    Then the log has entries matching:
+      | level | event                    | tenant   |
+      | :warn | :google/heartbeat-missed | :tonotop |
 
   Scenario: an expiry in the past is renewed immediately and reported
     Given the Workspace Events API has subscription "subscriptions/s-eng" for "spaces/ENG" expiring at "2026-09-18T09:00:00Z"

@@ -23,7 +23,7 @@
   "Keys of one organization's own config. Finding one of these directly under
    `:google` means the config was written flat — that is an error the schema
    reports, not a map of organizations."
-  #{:project :topic :oauth :pubsub :push :health :renew-within-hours})
+  #{:project :topic :oauth :push :health :renew-within-hours})
 
 (def ^:dynamic *tenant*
   "Organization the current thread is acting as. The push door binds it for a

@@ -50,8 +50,8 @@
                    (throw (ex-info "google registration requires :scheduler in isaac.nexus" {})))]
     (register-door! config register-identity!)
     ;; An :interval trigger fires after its first full period. A restart must
-    ;; not wait an hour to reconcile subscriptions and send the first heartbeat,
-    ;; so one tick is queued for the scheduler's next turn as well (isaac-nsh1).
+    ;; not wait an hour to reconcile subscriptions and judge health, so one
+    ;; tick is queued for the scheduler's next turn as well (isaac-nsh1).
     (scheduler/schedule! shared
                          {:id      :google/registration-boot
                           :trigger {:kind :delay :ms 1}

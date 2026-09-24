@@ -28,7 +28,6 @@
     [isaac.google.inbox :as inbox]
     [isaac.google.logins :as logins]
     [isaac.google.oauth :as oauth]
-    [isaac.google.pubsub :as pubsub]
     [isaac.google.registration :as registration]
     [isaac.google.scopes :as scopes]
     [isaac.google.smoke :as smoke]
@@ -61,15 +60,13 @@
 (def smoke-option-spec
   [[nil "--tenant TENANT" "Google organization to smoke (default: every one configured)"]
    [nil "--url URL" "Door URL to probe (default: http://127.0.0.1:<http.port>/google/pubsub)"]
-   [nil "--send-live" "Publish one real message to the live Pub/Sub topic and wait for it to reach the inbox"]
+   [nil "--send-live" "Retired: publishing is no longer Isaac's job (isaac-clly)"]
    [nil "--renew-within HOURS" "Override the renew window used to judge registrations"
     :parse-fn #(Long/parseLong %)]
    [nil "--inbox-threshold N" "Pending records tolerated before FAIL (default 0)"
     :default 0 :parse-fn #(Long/parseLong %)]
    [nil "--silent-threshold N" "google/silent conditions tolerated before FAIL (default 0)"
     :default 0 :parse-fn #(Long/parseLong %)]
-   [nil "--timeout-ms MS" "How long --send-live waits for the test message to reach the inbox (default 30000)"
-    :default 30000 :parse-fn #(Long/parseLong %)]
    ["-h" "--help" "Show help"]])
 
 (defn- derive-root [opts]
@@ -372,43 +369,6 @@
     (catch Exception e
       {:error (or (.getMessage e) (str e))})))
 
-(defn- publish-test-message!
-  "Publishes one real message to the tenant's own configured Pub/Sub topic,
-   authenticated as the tenant's Pub/Sub service account — the same publish
-   the hourly heartbeat makes (isaac.google.pubsub). `ce-type` names it so an
-   inbox worker with no handler for it just leaves it be — decide-live-push
-   only needs it to *arrive* (isaac-mu1i). Requires that service account to
-   hold roles/pubsub.publisher on the topic; a FAIL here says so
-   (isaac-286x)."
-  [config id]
-  (pubsub/publish! config id
-                   {:data       {:isaac-smoke true :at (str (Instant/now))}
-                    :attributes {"ce-type" smoke/PROBE-TYPE}}))
-
-(defn- await-arrival!
-  "Polls inbox/*'s status for message-id until it leaves :unknown or the
-   timeout elapses."
-  [root message-id timeout-ms]
-  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
-    (loop []
-      (let [status (inbox/status root message-id)]
-        (cond
-          (not= :unknown status)
-          {:arrived? true :arrived-as status}
-
-          (> (System/currentTimeMillis) deadline)
-          {:arrived? false}
-
-          :else
-          (do (Thread/sleep 250) (recur)))))))
-
-(defn- live-push-check! [root config id timeout-ms]
-  (let [{:keys [error message-id]} (publish-test-message! config id)]
-    (if error
-      (smoke/decide-live-push {:publish-error error})
-      (let [{:keys [arrived? arrived-as]} (await-arrival! root message-id timeout-ms)]
-        (smoke/decide-live-push {:message-id message-id :arrived? arrived? :arrived-as arrived-as})))))
-
 (defn- run-smoke [opts]
   (try
     (let [root      (derive-root opts)
@@ -444,10 +404,10 @@
           unhandled  (nexus/-with-nested-nexus {:fs fs* :root root} (inbox/unhandled root))
           inbox-result  (smoke/decide-inbox {:pending pending :unhandled unhandled :threshold (:inbox-threshold opts)})
           silent-result (smoke/decide-silent {:conditions conditions :threshold (:silent-threshold opts)})
-          live-results  (when (:send-live opts)
-                          (mapv #(live-push-check! root config % (:timeout-ms opts)) ids))
-          results    (concat [door-result] reg-results [inbox-result silent-result] live-results)]
+          results    (concat [door-result] reg-results [inbox-result silent-result])]
       (doseq [r results] (println (smoke/render-line r)))
+      (when (:send-live opts)
+        (binding [*out* *err*] (println smoke/SEND-LIVE-RETIRED)))
       (if (every? smoke/ok? results) 0 1))
     (catch Exception e
       (binding [*out* *err*]
@@ -492,4 +452,4 @@
 (defmethod cli-api/subcommands :google [_id]
   [{:name "login"  :summary "Sign in as the Google user — the consent screen comes back to this host, or --code to paste it (--tenant for one of several)"}
    {:name "status" :summary "Show Google registrations, expiries, last event, and door"}
-   {:name "smoke"  :summary "Live-host smoke before a release: door, registrations, inbox, silence (--send-live for one real message)"}])
+   {:name "smoke"  :summary "Live-host smoke before a release: door, registrations, inbox, silence"}])

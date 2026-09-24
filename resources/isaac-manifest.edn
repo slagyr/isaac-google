@@ -1,5 +1,5 @@
 {:id          :isaac.google
- :version     "0.1.14"
+ :version     "0.1.15"
  :builtin?    true
  :factory     isaac.google.module/create-module
  :description "Shared Google Workspace plumbing for Isaac — OAuth for the Google user, the Pub/Sub push door and durable inbox, registrations and renewal, health. Knows nothing of Chat or Gmail."
@@ -37,18 +37,11 @@
  ;; control" applies its reauthentication frequency (default 16h) to every app
  ;; requiring a Cloud Platform scope, non-Google apps included. That one scope
  ;; put Gmail, Chat and directory under the same clock and killed yopp's refresh
- ;; token every ~15 hours. Publishing is now the service account's job
- ;; (isaac.google.service-account, isaac-ey6q, isaac-286x).
+ ;; token every ~15 hours. Nothing here publishes at all now — a Cloud
+ ;; Scheduler job publishes the heartbeat as a Google APIs service account
+ ;; inside GCP (isaac-ey6q, isaac-286x, isaac-clly).
  :isaac.google/scopes ["openid"
                        "https://www.googleapis.com/auth/directory.readonly"]
-
- ;; The smoke probe (`isaac google smoke --send-live`) publishes one real
- ;; message of this ce-type to prove the door and inbox/accept! against a
- ;; genuine Google-signed push. With no handler it would sit in pending/
- ;; forever, or now, in unhandled/ with a warning on every host it ran
- ;; against — a probe should leave nothing behind (isaac-pl8x).
- :isaac.google/handler
- {"isaac.google.smoke/probe" isaac.google.smoke/noop-handler}
 
  ;; Who is this person? The agent asks Google with Isaac's own token, rather
  ;; than a crew shelling out to another CLI with its own grant (isaac-jqk2).
@@ -80,13 +73,15 @@
  :isaac/component
  {:google-registration {:namespace isaac.google.component}}
 
- ;; An organization with a topic publishes to it — the hourly heartbeat, and
- ;; `isaac google smoke --send-live`. Without a service-account key the host
- ;; would start clean, validate OK, and only say so an hour later when the
- ;; first heartbeat failed. That is the shape of failure isaac-286x exists to
- ;; end, so the absent credential is a config error at load instead.
+ ;; Nothing here publishes: a Cloud Scheduler job publishes the heartbeat to
+ ;; the topic as a Google APIs service account inside GCP, so there is no key
+ ;; to name and none for constraints/iam.disableServiceAccountKeyCreation to
+ ;; refuse. What is left to get wrong is the interval the watch judges arrival
+ ;; against — and a heartbeat configured without one would read as watched and
+ ;; never fire, so the loader refuses it instead (isaac-clly, replacing
+ ;; isaac-286x's credentials check).
  :isaac.config/check
- {:google-pubsub-credentials {:fn isaac.google.service-account/check-credentials}}
+ {:google-heartbeat {:fn isaac.google.health/check-heartbeat}}
 
  :isaac/cli
  {:google {:usage     "google <subcommand> [options]"
@@ -113,8 +108,7 @@
       :description "GCP project id that owns the Pub/Sub topic."},
      :topic
      {:type :string,
-      :description
-      "Pub/Sub topic path (projects/<id>/topics/<name>)."},
+      :description "Pub/Sub topic path (projects/<id>/topics/<name>)."},
      :renew-within-hours
      {:type :int,
       :description
@@ -123,7 +117,7 @@
      {:name :google-health,
       :type :map,
       :description
-      "Health thresholds for one Google organization: how long it may be silent, and its synthetic heartbeat.",
+      "Health thresholds for one Google organization: how long it may be silent, and the externally-published heartbeat it watches for.",
       :schema
       {:silent-after-hours
        {:type :int,
@@ -133,16 +127,23 @@
        {:name :google-heartbeat,
         :type :map,
         :description
-        "Synthetic Pub/Sub heartbeat: the registration tick publishes one message to this organization's topic and expects it back at the push door.",
+        "Pub/Sub heartbeat: a Cloud Scheduler job publishes one message to this organization's topic on a schedule and Isaac watches for it at the push door. Isaac publishes nothing — naming the interval is what turns the watch on.",
         :schema
-        {:enabled
-         {:type :boolean,
-          :description
-          "Publish a heartbeat on every registration tick. Default true."},
-         :deadline-ms
+        {:expected-interval-ms
          {:type :int,
           :description
-          "Milliseconds a published heartbeat has to reach the door before it counts as missed. Default 60000."}}}}},
+          "How often the external publisher (a Cloud Scheduler job on the topic) publishes a heartbeat, in milliseconds. Setting it is what turns the watch on; no heartbeat arriving for this long plus :grace-ms is :heartbeat-missed. No default — only the schedule the publisher runs on can say what late means."},
+         :grace-ms
+         {:type :int,
+          :description
+          "Milliseconds of slack past the expected arrival — scheduler jitter plus Pub/Sub delivery — before a heartbeat counts as missed. Default 60000."},
+         :enabled
+         {:type :boolean,
+          :validations
+          [[:retired?
+            "the heartbeat is published from outside Isaac now — set health.heartbeat.expected-interval-ms to the schedule the Cloud Scheduler job publishes on, or unset the heartbeat entirely (isaac-clly)"]],
+          :description
+          "Retired. Naming :expected-interval-ms is what turns the watch on; a switch that could be on over an interval nobody set is the inert watchdog this replaced."}}}}},
      :oauth
      {:name :google-oauth,
       :type :map,
@@ -166,16 +167,6 @@
        {:type :string,
         :description
         "Public base URL the login redirects back to, as https://<host>; the callback is <base>/google/oauth/callback and must be an Authorized redirect URI on a Web-application OAuth client. Unset, the login pastes a code (works with a Desktop client)."}}},
-     :pubsub
-     {:name :google-pubsub,
-      :type :map,
-      :description
-      "How Isaac publishes to this organization's topic — as a service account of its own, never as the signed-in person (isaac-286x).",
-      :schema
-      {:credentials-file
-       {:type :string,
-        :description
-        "Path to the service-account JSON key Isaac publishes to this organization's topic with — absolute, or relative to the Isaac root. Required once :topic is set. Keep the key out of the config file; it is a secret, like oauth.client-secret."}}},
      :push
      {:name :google-push,
       :type :map,

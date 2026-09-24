@@ -3,7 +3,6 @@
     [isaac.fs :as fs]
     [isaac.google.events]
     [isaac.google.health]
-    [isaac.google.heartbeat]
     [isaac.google.registration :as sut]
     [isaac.google.tenants :as tenants]
     [isaac.nexus :as nexus]
@@ -173,20 +172,18 @@
       (should= [[:renew :tonotop "subscriptions/s-tonotop"]] @@calls))
 
     ;; Health is judged per organization, so the tick hands it each
-    ;; organization with the keys that organization owns, and sends each one
-    ;; its heartbeat (isaac-an14).
-    (it "judges health per organization and sends each one a heartbeat"
-      (let [judged (atom nil)
-            beats  (atom nil)]
+    ;; organization with the keys that organization owns (isaac-an14). It
+    ;; publishes nothing on the way past: the heartbeat comes from a Cloud
+    ;; Scheduler job, so the probe no longer depends on the very timer it is
+    ;; meant to prove (isaac-clly).
+    (it "judges health per organization, publishing nothing"
+      (let [judged (atom nil)]
         (sut/register! [:chat @entry])
-        (with-redefs [isaac.google.health/evaluate    (fn [opts] (reset! judged opts) [])
-                      isaac.google.heartbeat/send-all! (fn [opts] (reset! beats opts))]
+        (with-redefs [isaac.google.health/evaluate (fn [opts] (reset! judged opts) [])]
           (sut/tick! {:now now :root root :config @cfg :door-up? true}))
         (should= [{:tenant :acme :keys ["spaces/acme"]}
                   {:tenant :tonotop :keys ["spaces/tonotop"]}]
-                 (:tenants @judged))
-        (should= [:acme :tonotop] (:tenants @beats))
-        (should= now (:now @beats))))
+                 (:tenants @judged))))
     )
 
   ;; A registration can cover a whole workspace while events arrive under
@@ -213,8 +210,7 @@
       (let [judged (atom nil)]
         (sut/register! [:chat @entry])
         (isaac.google.health/save-state! root {:last-event-at {"spaces/AAA" "2026-09-18T11:59:00Z"}})
-        (with-redefs [isaac.google.health/evaluate     (fn [opts] (reset! judged opts) [])
-                      isaac.google.heartbeat/send-all! (fn [_])]
+        (with-redefs [isaac.google.health/evaluate (fn [opts] (reset! judged opts) [])]
           (sut/tick! {:now now :root root :config @cfg :door-up? true}))
         (should= [{:tenant :tonotop :keys ["spaces/-" "spaces/AAA"]}] (:tenants @judged))))
     )
