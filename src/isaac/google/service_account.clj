@@ -26,6 +26,7 @@
     [clojure.string :as str]
     [isaac.config.root :as root]
     [isaac.fs :as fs]
+    [isaac.google.health :as health]
     [isaac.google.tenants :as tenants]
     [isaac.llm.http :as llm-http]
     [isaac.nexus :as nexus])
@@ -230,15 +231,29 @@
 ;; region ----- the config check -----
 
 (defn check-credentials
-  "An organization with a Pub/Sub topic must name the service account Isaac
-   publishes to it as. Without one the host starts, validates OK, and only
-   says so an hour later when the first heartbeat cannot be published — which
-   is the shape of failure this whole bean exists to end (isaac-286x)."
+  "An organization whose heartbeat is on must name the service account Isaac
+   publishes it as. Without one the host starts, validates OK, and only says
+   so an hour later when the first heartbeat cannot be published — which is
+   the shape of failure this whole bean exists to end (isaac-286x).
+
+   The demand follows the heartbeat, not the topic. A topic is also the
+   address Google *pushes to*, and receiving a push costs no credential at
+   all: Gmail and Chat keep working with no service account in sight. Only
+   the synthetic heartbeat publishes on a timer. Tying the demand to `:topic`
+   would refuse to start a host that merely receives — and, where an
+   organization forbids service-account keys, would leave no way to run at
+   all (yopp, 2026-09-24: `constraints/iam.disableServiceAccountKeyCreation`).
+   Turning the heartbeat off is then a real choice: the push pipeline loses
+   its silence detector, and nothing else changes.
+
+   `smoke --send-live` publishes too, but it is a command someone runs and
+   watches; it reports the missing credential itself."
   [{:keys [config]}]
   {:errors
    (vec
      (keep (fn [[id tenant]]
-             (when-not (str/blank? (str (:topic tenant)))
+             (when (and (not (str/blank? (str (:topic tenant))))
+                        (health/heartbeat-enabled? config id))
                (when-let [reason (:error (read-credentials config id))]
                  {:key   (credentials-key config id)
                   :value reason})))

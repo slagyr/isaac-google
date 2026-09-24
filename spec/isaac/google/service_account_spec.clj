@@ -176,7 +176,23 @@
       (let [cfg    {:root root :google {:tonotop (get-in config [:google :tonotop])}}
             errors (:errors (sut/check-credentials {:config cfg}))]
         (should= 1 (count errors))
-        (should-contain "names no file" (:value (first errors))))))
+        (should-contain "names no file" (:value (first errors)))))
+
+    ;; A topic is also the address Google pushes TO, and receiving costs no
+    ;; credential: Gmail and Chat keep working with no service account. Only
+    ;; the heartbeat publishes on a timer, so only the heartbeat may demand
+    ;; one. Where an organization forbids service-account keys outright
+    ;; (constraints/iam.disableServiceAccountKeyCreation, yopp 2026-09-24),
+    ;; turning the heartbeat off has to leave a host that still starts.
+    (it "asks nothing of an organization whose heartbeat is off"
+      (let [cfg (assoc-in {:root root :google {:acme (get-in config [:google :acme])}}
+                          [:google :acme :health :heartbeat :enabled] false)]
+        (should= [] (:errors (sut/check-credentials {:config cfg})))))
+
+    (it "still refuses when the heartbeat is left on"
+      (let [cfg (assoc-in {:root root :google {:acme (get-in config [:google :acme])}}
+                          [:google :acme :health :heartbeat :enabled] true)]
+        (should= 1 (count (:errors (sut/check-credentials {:config cfg})))))))
 
   (it "asks for no scope but Pub/Sub"
     (should= "https://www.googleapis.com/auth/pubsub" sut/SCOPE)
