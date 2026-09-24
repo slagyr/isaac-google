@@ -100,10 +100,26 @@
 
   (context "invalid_grant"
 
-    (it "names the Testing consent screen so operators know why to re-login"
+    ;; An Internal consent screen has no Testing state and no 7-day cap. The
+    ;; message that blamed one every time cost half a day of looking at a
+    ;; console page with nothing to change (isaac-ey6q).
+    (it "states only the rejection when no cause was detected"
       (let [msg (sut/invalid-grant-message)]
-        (should-contain "consent screen" msg)
-        (should-contain "Testing" msg)))
+        (should-contain "invalid_grant" msg)
+        (should-contain "isaac google login" msg)
+        (should-not (str/includes? msg "Testing"))
+        (should-not (str/includes? msg "consent screen"))))
+
+    (it "blames no consent screen for an ordinary grant"
+      (let [msg (sut/invalid-grant-message 3600)]
+        (should-contain "invalid_grant" msg)
+        (should-not (str/includes? msg "Testing"))))
+
+    (it "names the Testing consent screen once a 7-day token is detected"
+      (let [msg (sut/invalid-grant-message sut/SEVEN-DAY-SECONDS)]
+        (should-contain "7-day" msg)
+        (should-contain "Testing" msg)
+        (should-contain "isaac google login" msg)))
     )
 
   (context "seven-day token"

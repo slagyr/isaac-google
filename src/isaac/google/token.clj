@@ -49,13 +49,29 @@
     (str "No Google organization named. Configure google.<organization> and run "
          "`isaac google login --tenant <organization>` first.")))
 
+(defonce ^:private refresh-locks* (atom {}))
+
+(defn- refresh-lock
+  "One lock per auth store and provider. The scheduler and a live turn can
+   both find the same access token stale; without this they spend the same
+   refresh token twice and the loser writes its older answer over the
+   winner's, leaving a token on disk Google has already rotated away
+   (isaac-ey6q). Locks this process only — a separate `isaac` CLI process
+   refreshing the same store still races on auth.json."
+  [auth-dir provider]
+  (get-in (swap! refresh-locks* update-in [auth-dir provider]
+                 (fn [lock] (or lock (Object.))))
+          [auth-dir provider]))
+
 (defn- refresh-via-http! [auth-dir fs* provider tokens creds]
   (let [response (oauth/refresh! creds (:refresh tokens))]
     (cond
       (or (= "invalid_grant" (:error response))
           (= "invalid_grant" (get-in response [:body :error])))
       {:error   :auth-failed
-       :message (oauth/invalid-grant-message)}
+       :message (oauth/invalid-grant-message
+                  (or (:expires_in response)
+                      (get-in response [:body :expires_in])))}
 
       (or (:error response) (not (:access_token response)))
       {:error   (or (:error response) :auth-failed)
@@ -96,8 +112,20 @@
        {:error :auth-failed :message (login-message id)}
 
        :else
-       (let [result (refresh-via-http! auth-dir fs* provider tokens (oauth-creds config id))]
-         (or (:tokens result) result))))))
+       (locking (refresh-lock auth-dir provider)
+         ;; Read again inside the lock: another thread may have refreshed
+         ;; while this one waited, and its tokens are the live ones.
+         (let [tokens (or (auth-store/load-tokens auth-dir provider fs*) tokens)]
+           (cond
+             (not (auth-store/token-needs-refresh? tokens))
+             tokens
+
+             (str/blank? (:refresh tokens))
+             {:error :auth-failed :message (login-message id)}
+
+             :else
+             (let [result (refresh-via-http! auth-dir fs* provider tokens (oauth-creds config id))]
+               (or (:tokens result) result)))))))))
 
 (defn token
   "Valid Google access token string for an organization, refreshing when needed.

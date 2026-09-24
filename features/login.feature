@@ -60,10 +60,21 @@ Feature: Google user login
     Then the exit code is 1
     And the stderr contains "google.<organization>.oauth.client-id"
 
-  Scenario: a dead refresh token says why
+  # Google may answer a refresh with a *new* refresh token; the one that bought
+  # it dies on the spot, so the rotation has to reach the store (isaac-ey6q).
+  Scenario: a rotated refresh token replaces the stored one
+    Given the google auth store has an expired access token with refresh "rt-1"
+    And the Google token endpoint returns access token "at-2" and refresh token "rt-2" expiring in 3600
+    When the google access token is resolved
+    Then the google auth store has access "at-2" and refresh "rt-2"
+
+  # An Internal consent screen has no Testing state and no 7-day cap, so the
+  # rejection is reported as what it is and nothing more (isaac-ey6q).
+  Scenario: a dead refresh token says only what Google said
     Given the google auth store has an expired access token with refresh "rt-old"
     And the Google token endpoint rejects refresh with "invalid_grant"
     When the google access token is resolved
     Then an error is reported indicating authentication failed
-    And the error mentions "consent screen"
-    And the error mentions "Testing"
+    And the error mentions "invalid_grant"
+    And the error mentions "isaac google login"
+    And the error does not mention "Testing"

@@ -222,10 +222,15 @@
                            {:marigold.skybeam {:manifest {:id :marigold.skybeam
                                                           :isaac.google/scopes [scope]}}}))))
 
+(defn- reported-error-message []
+  (let [err (or (g/get :google-error) (g/get :llm-result) {})]
+    (str (or (:message err) (g/get :stderr) (g/get :output) ""))))
+
 (defn error-mentions [text]
-  (let [err     (or (g/get :google-error) (g/get :llm-result) {})
-        message (or (:message err) (g/get :stderr) (g/get :output) "")]
-    (g/should (str/includes? (str message) text))))
+  (g/should (str/includes? (reported-error-message) text)))
+
+(defn error-does-not-mention [text]
+  (g/should-not (str/includes? (reported-error-message) text)))
 
 (defgiven #"the Google token endpoint returns access token \"([^\"]+)\" and refresh token \"([^\"]+)\" expiring in (\d+)"
   isaac.google-steps/google-token-endpoint-returns-access-and-refresh)
@@ -250,6 +255,9 @@
 
 (defthen "the error mentions {text:string}"
   isaac.google-steps/error-mentions)
+
+(defthen "the error does not mention {text:string}"
+  isaac.google-steps/error-does-not-mention)
 
 (defthen #"the google auth store for tenant \"([^\"]+)\" has access \"([^\"]+)\" and refresh \"([^\"]+)\""
   isaac.google-steps/google-auth-store-for-tenant-has-access-and-refresh)

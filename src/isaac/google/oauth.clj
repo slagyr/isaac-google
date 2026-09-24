@@ -52,11 +52,21 @@
                         :client_id     client-id
                         :client_secret client-secret}))
 
-(defn invalid-grant-message []
-  (str "Google rejected the refresh token (invalid_grant). "
-       "The consent screen is still in Testing — publish the app or "
-       "re-run `isaac google login`."))
-
 (defn seven-day-token? [expires-in]
   (and (number? expires-in)
        (>= expires-in SEVEN-DAY-SECONDS)))
+
+(defn invalid-grant-message
+  "What Google actually said, and no more. The Testing consent screen is named
+   only where a 7-day token was observed for the grant: an Internal app has no
+   Testing state and no 7-day cap, so blaming one sends the operator to a
+   console page with nothing to change (isaac-ey6q)."
+  ([] (invalid-grant-message nil))
+  ([expires-in]
+   (if (seven-day-token? expires-in)
+     (str "Google rejected the refresh token (invalid_grant). "
+          "Google issued a 7-day refresh token for this grant — the consent "
+          "screen is still in Testing, so publish the app, then re-run "
+          "`isaac google login`.")
+     (str "Google rejected the refresh token (invalid_grant); "
+          "re-run `isaac google login`."))))
