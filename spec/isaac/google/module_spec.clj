@@ -6,7 +6,7 @@
     [isaac.google.door :as door]
     [isaac.google.module :as sut]
     [isaac.google.people :as people]
-    [speclj.core :refer [describe it should should-be-nil should=]]))
+    [speclj.core :refer [describe it should should-be-nil should-not-contain should=]]))
 
 (def manifest
   (edn/read-string (slurp "resources/isaac-manifest.edn")))
@@ -34,10 +34,24 @@
   (it "declares no push-door identity of its own"
     (should-be-nil (:isaac.http/identity manifest)))
 
-  (it "declares the scopes berth and contributes openid, the directory scope and pubsub"
+  (it "declares the scopes berth and contributes openid and the directory scope"
     (should= :seq (get-in manifest [:berths :isaac.google/scopes :schema :type]))
-    (should= ["openid" people/DIRECTORY-SCOPE "https://www.googleapis.com/auth/pubsub"]
+    (should= ["openid" people/DIRECTORY-SCOPE]
              (:isaac.google/scopes manifest)))
+
+  ;; A Cloud Platform scope on a human's grant puts the whole Google login —
+  ;; Gmail, Chat, directory — under the Workspace's Cloud session-control
+  ;; clock. Pub/Sub is the service account's job now (isaac-ey6q, isaac-286x).
+  (it "contributes no Google Cloud Platform scope to the user's login"
+    (doseq [scope (:isaac.google/scopes manifest)]
+      (should-not-contain "auth/pubsub" scope)
+      (should-not-contain "cloud-platform" scope)))
+
+  ;; Absent, the host starts, validates OK, and only says so an hour later
+  ;; when the first heartbeat cannot be published (isaac-286x).
+  (it "contributes a config check for the Pub/Sub service account"
+    (should= 'isaac.google.service-account/check-credentials
+             (get-in manifest [:isaac.config/check :google-pubsub-credentials :fn])))
 
   (it "declares the registration berth"
     (should= :map (get-in manifest [:berths :isaac.google/registration :schema :type]))

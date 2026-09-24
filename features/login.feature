@@ -46,6 +46,22 @@ Feature: Google user login
     And the stdout contains "openid"
     And the stdout contains "chat.messages.readonly"
 
+  # This is the consent screen, not the manifest: what Google will actually ask
+  # the person to agree to. A Workspace applies "Google Cloud console and SDK
+  # session control" to any app requiring a Cloud Platform scope — non-Google
+  # apps explicitly included — so one machine scope here puts Gmail, Chat and
+  # the directory under a 16-hour reauthentication clock. On yopp that killed
+  # the refresh token every ~15 hours (isaac-ey6q, isaac-286x).
+  Scenario: the consent screen asks for no Cloud Platform scope
+    Given the skybeam fixture module contributes the Google scope "https://www.googleapis.com/auth/chat.messages.readonly"
+    When isaac is run with "google login"
+    Then the exit code is 0
+    And the consent URL asks for no Cloud Platform scope
+    And the consent URL asks for "openid"
+    And the consent URL asks for "https://www.googleapis.com/auth/directory.readonly"
+    And the consent URL asks for "https://www.googleapis.com/auth/chat.messages.readonly"
+    And the stdout does not contain "auth/pubsub"
+
   # A host the internet cannot reach has nowhere to redirect the browser, so
   # it keeps the paste-a-code login (isaac-2abl).
   Scenario: a host with no public base still logs in by pasting the code

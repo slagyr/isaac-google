@@ -1,5 +1,5 @@
 {:id          :isaac.google
- :version     "0.1.13"
+ :version     "0.1.14"
  :builtin?    true
  :factory     isaac.google.module/create-module
  :description "Shared Google Workspace plumbing for Isaac — OAuth for the Google user, the Pub/Sub push door and durable inbox, registrations and renewal, health. Knows nothing of Chat or Gmail."
@@ -30,11 +30,17 @@
 
  ;; directory.readonly lets isaac.google.people ask the Workspace directory for a
  ;; user's email: Chat never gives one for a human sender (isaac-8s6s).
- ;; pubsub: the hourly heartbeat and `isaac google smoke --send-live` publish to
- ;; the organization's own topic as the signed-in user (isaac-an14, isaac-mu1i).
+ ;;
+ ;; No Cloud Platform scope belongs here. `auth/pubsub` used to, so the hourly
+ ;; heartbeat and `isaac google smoke --send-live` could publish as the
+ ;; signed-in user — and a Workspace with "Google Cloud console and SDK session
+ ;; control" applies its reauthentication frequency (default 16h) to every app
+ ;; requiring a Cloud Platform scope, non-Google apps included. That one scope
+ ;; put Gmail, Chat and directory under the same clock and killed yopp's refresh
+ ;; token every ~15 hours. Publishing is now the service account's job
+ ;; (isaac.google.service-account, isaac-ey6q, isaac-286x).
  :isaac.google/scopes ["openid"
-                       "https://www.googleapis.com/auth/directory.readonly"
-                       "https://www.googleapis.com/auth/pubsub"]
+                       "https://www.googleapis.com/auth/directory.readonly"]
 
  ;; The smoke probe (`isaac google smoke --send-live`) publishes one real
  ;; message of this ce-type to prove the door and inbox/accept! against a
@@ -73,6 +79,14 @@
 
  :isaac/component
  {:google-registration {:namespace isaac.google.component}}
+
+ ;; An organization with a topic publishes to it — the hourly heartbeat, and
+ ;; `isaac google smoke --send-live`. Without a service-account key the host
+ ;; would start clean, validate OK, and only say so an hour later when the
+ ;; first heartbeat failed. That is the shape of failure isaac-286x exists to
+ ;; end, so the absent credential is a config error at load instead.
+ :isaac.config/check
+ {:google-pubsub-credentials {:fn isaac.google.service-account/check-credentials}}
 
  :isaac/cli
  {:google {:usage     "google <subcommand> [options]"
@@ -152,6 +166,16 @@
        {:type :string,
         :description
         "Public base URL the login redirects back to, as https://<host>; the callback is <base>/google/oauth/callback and must be an Authorized redirect URI on a Web-application OAuth client. Unset, the login pastes a code (works with a Desktop client)."}}},
+     :pubsub
+     {:name :google-pubsub,
+      :type :map,
+      :description
+      "How Isaac publishes to this organization's topic — as a service account of its own, never as the signed-in person (isaac-286x).",
+      :schema
+      {:credentials-file
+       {:type :string,
+        :description
+        "Path to the service-account JSON key Isaac publishes to this organization's topic with — absolute, or relative to the Isaac root. Required once :topic is set. Keep the key out of the config file; it is a secret, like oauth.client-secret."}}},
      :push
      {:name :google-push,
       :type :map,

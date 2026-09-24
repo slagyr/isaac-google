@@ -374,12 +374,12 @@
 
 (defn- publish-test-message!
   "Publishes one real message to the tenant's own configured Pub/Sub topic,
-   authenticated with its stored Google token — the same publish the hourly
-   heartbeat makes (isaac.google.pubsub). `ce-type` names it so an inbox
-   worker with no handler for it just leaves it be — decide-live-push only
-   needs it to *arrive* (isaac-mu1i). Requires the token to carry
-   pubsub.topics.publish on the topic, which the rollout's push-subscription
-   grants do not give it by default; a FAIL here says so."
+   authenticated as the tenant's Pub/Sub service account — the same publish
+   the hourly heartbeat makes (isaac.google.pubsub). `ce-type` names it so an
+   inbox worker with no handler for it just leaves it be — decide-live-push
+   only needs it to *arrive* (isaac-mu1i). Requires that service account to
+   hold roles/pubsub.publisher on the topic; a FAIL here says so
+   (isaac-286x)."
   [config id]
   (pubsub/publish! config id
                    {:data       {:isaac-smoke true :at (str (Instant/now))}

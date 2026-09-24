@@ -24,6 +24,13 @@
                  :service-account {:type        :string
                                    :description "Push subscription service account email."}}})
 
+(def pubsub-schema
+  {:name        :google-pubsub
+   :type        :map
+   :description "How Isaac publishes to this organization's topic — as a service account of its own, never as the signed-in person (isaac-286x)."
+   :schema      {:credentials-file {:type        :string
+                                    :description "Path to the service-account JSON key Isaac publishes to this organization's topic with — absolute, or relative to the Isaac root. Required once :topic is set. Keep the key out of the config file; it is a secret, like oauth.client-secret."}}})
+
 (def heartbeat-schema
   {:name        :google-heartbeat
    :type        :map
@@ -42,8 +49,9 @@
                  :heartbeat          heartbeat-schema}})
 
 (def tenant-fields
-  "One Google organization's complete set: its project, topic, OAuth client
-   (and so the Google user Isaac signs in as) and push service account."
+  "One Google organization's complete set: its project, topic, the identity
+   it publishes to that topic as, the OAuth client (and so the Google user
+   Isaac signs in as) and its push service account."
   {:project            {:type        :string
                         :description "GCP project id that owns the Pub/Sub topic."}
    :topic              {:type        :string
@@ -52,6 +60,7 @@
                         :description "Hours before expiry at which the registration timer renews a subscription. Default 24."}
    :health             health-schema
    :oauth              oauth-schema
+   :pubsub             pubsub-schema
    :push               push-schema})
 
 (def tenant-schema

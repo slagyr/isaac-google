@@ -5,7 +5,14 @@
    GCP project, are created with that tenant's token, and expire on that
    tenant's window. So one tick surveys and reconciles each configured tenant
    in turn with `tenants/*tenant*` bound; a single-organization host has one
-   tenant (`:default`) and behaves exactly as before (isaac-1zkz)."
+   tenant (`:default`) and behaves exactly as before (isaac-1zkz).
+
+   These stay on the *human's* token, deliberately. A Workspace Events
+   subscription on `//chat.googleapis.com/spaces/-` means \"every space this
+   account belongs to\" — a statement about a person, which no service
+   account can make for them — and `subscriptions.create` needs no Pub/Sub
+   scope to name a topic as its notification endpoint. Only the publishing
+   moved to a service account (isaac.google.pubsub, isaac-286x)."
   (:require
     [clojure.edn :as edn]
     [clojure.pprint :as pprint]

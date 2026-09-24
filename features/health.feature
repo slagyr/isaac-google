@@ -13,6 +13,7 @@ Feature: Google health and attention
     And config:
       | log.output                               | memory                         |
       | google.tonotop.topic                             | projects/marigold/topics/isaac |
+      | google.tonotop.pubsub.credentials-file           | google/pubsub-sa.json          |
       | google.tonotop.health.silent-after-hours         | 6                              |
       | google.tonotop.health.heartbeat.enabled          | false                          |
       | attention.notify.comm                    | discord                        |
@@ -20,6 +21,7 @@ Feature: Google health and attention
       | comms.gchat.gchat/account                | yopp@tonotop.com               |
       | comms.gchat.gchat/spaces.spaces/ENG.name | engineering                    |
     And the google auth store has access "at-1" and refresh "rt-1"
+    And a Pub/Sub service-account key at "google/pubsub-sa.json"
     And the Workspace Events API has subscription "subscriptions/s-eng" for "spaces/ENG" expiring at "2026-09-25T12:00:00Z"
     And the clock is fixed at "2026-09-18T12:00:00Z"
 
@@ -84,12 +86,17 @@ Feature: Google health and attention
       | event                  |
       | :google/health-cleared |
 
+  # The heartbeat is a Pub/Sub publish, and publishing is machine work: it goes
+  # out as the organization's service account, never as the signed-in person
+  # whose token fetches Chat (isaac-286x).
   Scenario: a heartbeat that never arrives is reported once and cleared when one does
     Given config:
       | google.tonotop.health.heartbeat.enabled | true |
     And the last Google event for "spaces/ENG" was at "2026-09-18T11:30:00Z"
     When the google registration timer ticks
     Then a Google heartbeat was published to "projects/marigold/topics/isaac"
+    And the Pub/Sub publish to "projects/marigold/topics/isaac" carried the service account's token
+    And the service account asked Google only for "https://www.googleapis.com/auth/pubsub"
     And the log has no entries matching:
       | event                    |
       | :google/heartbeat-missed |

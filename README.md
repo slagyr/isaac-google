@@ -24,6 +24,10 @@ Part of the Google Workspace comms epic (isaac-bv1l).
 
 - Module (`isaac.google.module/create-module`), manifest id `:isaac.google`.
 - OAuth scopes berth, Pub/Sub handler berth, Workspace Events registration/renewal.
+- Pub/Sub publishing (heartbeat, `smoke --send-live`) authenticates as a service
+  account — `google.<org>.pubsub.credentials-file` — never as the signed-in user:
+  a Cloud Platform scope on a human's grant drags the whole Google login under the
+  Workspace's Cloud reauthentication clock (isaac-286x; see `doc/rollout.md`).
 - Further work is planned in the beans under isaac-bv1l.
 
 ## Development

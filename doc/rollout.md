@@ -75,7 +75,42 @@ gcloud pubsub subscriptions create isaac-push --topic=isaac \
     --push-auth-service-account=isaac-push@$PROJECT.iam.gserviceaccount.com \
     --push-auth-token-audience=$DOOR \
     --min-retry-delay=10s --max-retry-delay=600s --expiration-period=never
+
+# The identity Isaac PUBLISHES as — the hourly heartbeat and
+# `isaac google smoke --send-live`. This is a separate account from
+# isaac-push above: that one only signs the tokens Google sends us.
+# It exists so no Cloud Platform scope rides on the human's login
+# (isaac-286x; see "Why Isaac publishes as a service account" below).
+gcloud iam service-accounts create isaac-pubsub --display-name=isaac-pubsub
+gcloud pubsub topics add-iam-policy-binding isaac --role=roles/pubsub.publisher \
+    --member=serviceAccount:isaac-pubsub@$PROJECT.iam.gserviceaccount.com
+gcloud iam service-accounts keys create /tmp/isaac-pubsub.json \
+    --iam-account=isaac-pubsub@$PROJECT.iam.gserviceaccount.com
+# Move /tmp/isaac-pubsub.json to the Isaac host (scp, not chat), then delete
+# the Cloud Shell copy. On the host:
+#   install -m 600 isaac-pubsub.json ~/.isaac/google/pubsub-sa.json
 ```
+
+### Why Isaac publishes as a service account (isaac-286x)
+
+`https://www.googleapis.com/auth/pubsub` is a Google **Cloud Platform** scope.
+A Workspace that configures *Admin console → Security → Access and data
+control → Google session control → Google Cloud console and SDK session
+control* applies its reauthentication frequency — default **16 hours** — to
+every app requiring a Cloud Platform scope, and the page says in as many words
+that this "also applies to non-Google apps". While isaac-google asked for
+`auth/pubsub` on the **user** login, that one machine scope put the whole
+grant — Gmail, Chat, directory — under the clock: on yopp the refresh token
+died 14h50m after every login, survived a fresh login, and died again on the
+same cycle, with the stored refresh token byte-identical throughout because
+Google revoked it server-side (isaac-ey6q).
+
+So publishing is the `isaac-pubsub` service account's job, the user login asks
+for no Cloud scope at all, and the Workspace policy has nothing to grip.
+Everything else stays on the human's token on purpose: a Workspace Events
+subscription on `spaces/-` means "every space *this account* belongs to",
+which is a statement about a person, and `subscriptions.create` needs no
+Pub/Sub scope to name a topic as its notification endpoint.
 
 Deliveries fail until step 5 exposes the door — expected; retention is 7 days
 and the backoff keeps Pub/Sub from hammering the host.
@@ -111,11 +146,32 @@ per grant; Isaac asks for its own.
 Non-secret keys first:
 
 ```
-isaac config set google.project <project>
-isaac config set google.topic projects/<project>/topics/isaac
-isaac config set google.push.endpoint <host-url>/google/pubsub
-isaac config set google.push.service-account isaac-push@<project>.iam.gserviceaccount.com
+isaac config set google.<org>.project <project>
+isaac config set google.<org>.topic projects/<project>/topics/isaac
+isaac config set google.<org>.pubsub.credentials-file google/pubsub-sa.json
+isaac config set google.<org>.push.endpoint <host-url>/google/pubsub
+isaac config set google.<org>.push.service-account isaac-push@<project>.iam.gserviceaccount.com
 ```
+
+`pubsub.credentials-file` is the key created in step 2a, absolute or relative
+to the Isaac root. It is **required once `topic` is set**: `isaac config
+validate` fails and the host refuses to start without it, rather than starting
+clean and failing on the first heartbeat an hour later.
+
+**Upgrading a host that already runs isaac-google.** The key and the config
+line go in *first*, then the new build — in that order the host never sees an
+invalid config. An older build treats `pubsub.credentials-file` as an unknown
+key, which is a warning, so setting it early costs nothing:
+
+1. create `isaac-pubsub`, grant it `roles/pubsub.publisher` on the topic, issue
+   and install its key (step 2a);
+2. `isaac config set google.<org>.pubsub.credentials-file google/pubsub-sa.json`
+   and `isaac config validate` on the *old* build — warning, still OK;
+3. `isaac modules upgrade isaac.google`; restart;
+4. `isaac google login --tenant <org>` once, so the stored grant is re-minted
+   without the Cloud scope. Existing tokens keep working until then — the old
+   grant simply carries a scope nothing asks for any more, and stays under the
+   reauth clock until it is replaced.
 
 Restart if the host does not hot-reload; `isaac http auth list` then shows
 `google-pubsub (oidc)` with the issuer and the resolved audience.

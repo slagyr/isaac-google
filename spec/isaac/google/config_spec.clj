@@ -7,11 +7,11 @@
 (defn- oauth-field [k]
   (get-in sut/google-schema [:value-spec :schema :oauth :schema k]))
 
-(def tenant-fields #{:project :topic :oauth :push :renew-within-hours :health})
+(def tenant-fields #{:project :topic :oauth :pubsub :push :renew-within-hours :health})
 
 (describe "isaac.google config schema"
 
-  (it "exposes one organization's table with :project :topic :oauth :push :renew-within-hours :health"
+  (it "exposes one organization's table with :project :topic :oauth :pubsub :push :renew-within-hours :health"
     (should= tenant-fields (set (keys (get-in sut/google-schema [:value-spec :schema])))))
 
   (it "requires client-id"
@@ -44,6 +44,19 @@
   (it "declares push endpoint and service-account"
     (should= :string (get-in sut/google-schema [:value-spec :schema :push :schema :endpoint :type]))
     (should= :string (get-in sut/google-schema [:value-spec :schema :push :schema :service-account :type])))
+
+  ;; Publishing is machine work. It gets an identity of its own — a key named
+  ;; by path, kept out of the config file like any other secret (isaac-286x).
+  (it "declares where the Pub/Sub service-account key lives"
+    (should= :string (get-in sut/google-schema [:value-spec :schema :pubsub :schema :credentials-file :type]))
+    (should-contain "service-account JSON key"
+                    (get-in sut/google-schema [:value-spec :schema :pubsub :schema :credentials-file :description])))
+
+  ;; It is a secret: the schema says to keep it out of the config file, the
+  ;; same thing oauth.client-secret says.
+  (it "keeps no service-account key in the config itself"
+    (should= #{:credentials-file}
+             (set (keys (get-in sut/google-schema [:value-spec :schema :pubsub :schema])))))
 
   (context "one shape: organization id -> that organization's config (isaac-okfj)"
 
