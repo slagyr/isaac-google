@@ -1,7 +1,7 @@
 (ns isaac.google.scopes
   (:require
-    [isaac.module.berths :as berths]
-    [isaac.module.discovery :as discovery]))
+    [isaac.foundation.module.berths :as berths]
+    [isaac.foundation.module.discovery :as discovery]))
 
 (def OPENID "openid")
 

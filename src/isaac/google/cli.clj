@@ -16,12 +16,12 @@
     [babashka.http-client :as http]
     [clojure.string :as str]
     [clojure.tools.cli :as tools-cli]
-    [isaac.cli.api :as cli-api]
-    [isaac.cli.common :as cli-common]
-    [isaac.cli.registry :as cli]
-    [isaac.config.loader :as loader]
-    [isaac.config.root :as root]
-    [isaac.fs :as fs]
+    [isaac.foundation.cli.api :as cli-api]
+    [isaac.foundation.cli.common :as cli-common]
+    [isaac.foundation.cli.registry :as cli]
+    [isaac.foundation.config.loader :as loader]
+    [isaac.foundation.config.root :as root]
+    [isaac.foundation.fs :as fs]
     [isaac.google.door :as door]
     [isaac.google.events :as events]
     [isaac.google.health :as health]
@@ -32,8 +32,8 @@
     [isaac.google.scopes :as scopes]
     [isaac.google.smoke :as smoke]
     [isaac.google.tenants :as tenants]
-    [isaac.llm.auth.store :as auth-store]
-    [isaac.nexus :as nexus])
+    [isaac.agent.llm.auth.store :as auth-store]
+    [isaac.foundation.nexus :as nexus])
   (:import (java.time Instant)))
 
 (def REDIRECT-URI
@@ -330,18 +330,18 @@
 ;; means and how to run it.
 
 (defn- http-server-config-fn
-  "isaac-http's own resolved bind config — isaac.config.server-config/
+  "isaac-http's own resolved bind config — isaac.http.config.server-config/
    server-config, which defaults :port to 6674 exactly as the server itself
    does when a host sets no :http :port. isaac-google does not depend on
    isaac-http at compile time (the same requiring-resolve seam
    isaac.google.door/registrar uses for the identity layer), so a host that
    has not loaded isaac-http gets nil here and falls back below."
   []
-  (try (requiring-resolve 'isaac.config.server-config/server-config)
+  (try (requiring-resolve 'isaac.http.config.server-config/server-config)
        (catch Exception _ nil)))
 
 (def ^:private FALLBACK-HTTP-PORT
-  "isaac-http's own default (isaac.config.server-config/server-config) for a
+  "isaac-http's own default (isaac.http.config.server-config/server-config) for a
    host with no :http :port configured. Kept here only for a host where
    isaac-http itself is not loaded to resolve against (isaac-8zl8)."
   6674)

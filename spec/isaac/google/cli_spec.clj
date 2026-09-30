@@ -4,14 +4,14 @@
    while curl on the real port answered 401 (isaac-8zl8). It must instead
    carry the port isaac-http's own resolved bind config would actually use."
   (:require
-    [isaac.fs :as fs]
+    [isaac.foundation.fs :as fs]
     [isaac.google.cli :as sut]
-    [isaac.nexus :as nexus]
+    [isaac.foundation.nexus :as nexus]
     [speclj.core :refer :all]))
 
 (describe "google cli — default door url (isaac-8zl8)"
 
-  ;; isaac-http's own resolved bind config (isaac.config.server-config/
+  ;; isaac-http's own resolved bind config (isaac.http.config.server-config/
   ;; server-config) composes the schema from the classpath's module
   ;; manifests, which needs a real filesystem to discover — not the mem-fs
   ;; most specs in this project install for the Google root's own files.

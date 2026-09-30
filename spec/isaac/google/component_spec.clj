@@ -1,12 +1,12 @@
 (ns isaac.google.component-spec
   (:require
-    [isaac.component.protocol :as component]
-    [isaac.config.loader :as loader]
+    [isaac.foundation.component.protocol :as component]
+    [isaac.foundation.config.loader :as loader]
     [isaac.google.component :as sut]
     [isaac.google.door :as door]
     [isaac.google.registration]
-    [isaac.nexus :as nexus]
-    [isaac.scheduler.runtime :as scheduler]
+    [isaac.foundation.nexus :as nexus]
+    [isaac.foundation.scheduler.runtime :as scheduler]
     [speclj.core :refer :all]))
 
 (defn- entry-id

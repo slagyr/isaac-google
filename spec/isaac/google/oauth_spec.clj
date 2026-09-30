@@ -3,7 +3,7 @@
     [clojure.string :as str]
     [isaac.google.oauth :as sut]
     [isaac.google.scopes :as scopes]
-    [isaac.llm.http :as llm-http]
+    [isaac.agent.llm.http :as llm-http]
     [speclj.core :refer [context describe it should should-contain should= should-not]]))
 
 (describe "isaac.google.oauth"
@@ -45,7 +45,7 @@
 
   (context "code exchange"
 
-    (it "POSTs authorization_code through isaac.llm.http"
+    (it "POSTs authorization_code through isaac.agent.llm.http"
       (let [captured (atom nil)]
         (with-redefs [llm-http/post-json! (fn [url headers body & _]
                                             (reset! captured {:url url :headers headers :body body})
@@ -81,7 +81,7 @@
 
   (context "refresh"
 
-    (it "POSTs refresh_token through isaac.llm.http"
+    (it "POSTs refresh_token through isaac.agent.llm.http"
       (let [captured (atom nil)]
         (with-redefs [llm-http/post-json! (fn [url headers body & _]
                                             (reset! captured {:url url :headers headers :body body})

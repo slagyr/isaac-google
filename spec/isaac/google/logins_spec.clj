@@ -1,8 +1,8 @@
 (ns isaac.google.logins-spec
   (:require
-    [isaac.fs :as fs]
+    [isaac.foundation.fs :as fs]
     [isaac.google.logins :as sut]
-    [isaac.nexus :as nexus]
+    [isaac.foundation.nexus :as nexus]
     [speclj.core :refer [around context describe it should should-be-nil should-not should-not-be-nil should=]])
   (:import
     (java.time Instant)))

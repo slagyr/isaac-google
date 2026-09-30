@@ -8,13 +8,13 @@
    no unnamed Google login (isaac-okfj)."
   (:require
     [clojure.string :as str]
-    [isaac.config.loader :as loader]
-    [isaac.config.root :as root]
-    [isaac.fs :as fs]
+    [isaac.foundation.config.loader :as loader]
+    [isaac.foundation.config.root :as root]
+    [isaac.foundation.fs :as fs]
     [isaac.google.oauth :as oauth]
     [isaac.google.tenants :as tenants]
-    [isaac.llm.auth.store :as auth-store]
-    [isaac.nexus :as nexus]))
+    [isaac.agent.llm.auth.store :as auth-store]
+    [isaac.foundation.nexus :as nexus]))
 
 (def PROVIDER "google")
 

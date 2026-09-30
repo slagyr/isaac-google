@@ -1,8 +1,8 @@
 (ns isaac.google.inbox-spec
   (:require
-    [isaac.fs :as fs]
+    [isaac.foundation.fs :as fs]
     [isaac.google.inbox :as sut]
-    [isaac.nexus :as nexus]
+    [isaac.foundation.nexus :as nexus]
     [speclj.core :refer :all]))
 
 (describe "google inbox"

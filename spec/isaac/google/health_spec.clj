@@ -1,7 +1,7 @@
 (ns isaac.google.health-spec
   (:require
     [isaac.google.health :as sut]
-    [isaac.logger :as log]
+    [isaac.foundation.logger :as log]
     [speclj.core :refer :all])
   (:import (java.time Instant)))
 

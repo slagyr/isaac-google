@@ -1,17 +1,17 @@
 (ns isaac.google.http-spec
   (:require
     [cheshire.core :as json]
-    [isaac.fs :as fs]
+    [isaac.foundation.fs :as fs]
     [isaac.google.health :as health]
     [isaac.google.heartbeat :as heartbeat]
     [isaac.google.http :as sut]
     [isaac.google.inbox :as inbox]
     [isaac.google.logins :as logins]
-    [isaac.llm.auth.store :as auth-store]
-    [isaac.llm.http :as llm-http]
-    [isaac.logger :as log]
-    [isaac.nexus :as nexus]
-    [isaac.tool.memory :as memory]
+    [isaac.agent.llm.auth.store :as auth-store]
+    [isaac.agent.llm.http :as llm-http]
+    [isaac.foundation.logger :as log]
+    [isaac.foundation.nexus :as nexus]
+    [isaac.agent.tool.memory :as memory]
     [speclj.core :refer :all])
   (:import
     (java.time Instant)

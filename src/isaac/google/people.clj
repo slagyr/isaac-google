@@ -10,7 +10,7 @@
     [clojure.string :as str]
     [isaac.google.events :as events]
     [isaac.google.tenants :as tenants]
-    [isaac.logger :as log]))
+    [isaac.foundation.logger :as log]))
 
 (def BASE "https://people.googleapis.com/v1")
 

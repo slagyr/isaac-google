@@ -1,7 +1,7 @@
 (ns isaac.google.config-spec
   (:require
     [isaac.google.config :as sut]
-    [isaac.schema.lexicon :as lexicon]
+    [isaac.foundation.schema.lexicon :as lexicon]
     [speclj.core :refer [context describe it should-be-nil should-contain should-not-contain should=]]))
 
 (defn- oauth-field [k]

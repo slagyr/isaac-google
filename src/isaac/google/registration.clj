@@ -18,18 +18,18 @@
     [clojure.edn :as edn]
     [clojure.pprint :as pprint]
     [clojure.set :as set]
-    [isaac.config.loader :as loader]
-    [isaac.config.root :as root]
-    [isaac.fs :as fs]
+    [isaac.foundation.config.loader :as loader]
+    [isaac.foundation.config.root :as root]
+    [isaac.foundation.fs :as fs]
     [isaac.google.events :as events]
     [isaac.google.health :as health]
     [isaac.google.tenants :as tenants]
-    [isaac.logger :as log]
-    [isaac.module.berths :as berths]
-    [isaac.module.discovery :as discovery]
-    [isaac.nexus :as nexus]
-    [isaac.runner :as runner]
-    [isaac.tool.memory :as memory])
+    [isaac.foundation.logger :as log]
+    [isaac.foundation.module.berths :as berths]
+    [isaac.foundation.module.discovery :as discovery]
+    [isaac.foundation.nexus :as nexus]
+    [isaac.foundation.runner :as runner]
+    [isaac.agent.tool.memory :as memory])
   (:import (java.time Duration Instant)))
 
 (defonce ^:private registrations* (atom {}))
@@ -240,9 +240,9 @@
   (boolean
     (try
       (or (runner/running?)
-          (some? ((requiring-resolve 'isaac.component.registry/instance-for) :http))
-          (some? ((requiring-resolve 'isaac.component.registry/instance-for) :server-runtime))
-          (some? ((requiring-resolve 'isaac.component.registry/instance-for) :google-registration)))
+          (some? ((requiring-resolve 'isaac.foundation.component.registry/instance-for) :http))
+          (some? ((requiring-resolve 'isaac.foundation.component.registry/instance-for) :server-runtime))
+          (some? ((requiring-resolve 'isaac.foundation.component.registry/instance-for) :google-registration)))
       (catch Exception _ false))))
 
 (defn- list-subscriptions []

@@ -23,8 +23,8 @@
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
-    [isaac.config.loader :as loader]
-    [isaac.fs :as fs]
+    [isaac.foundation.config.loader :as loader]
+    [isaac.foundation.fs :as fs]
     [isaac.google.door :as door]
     [isaac.google.health :as health]
     [isaac.google.heartbeat :as heartbeat]
@@ -33,10 +33,10 @@
     [isaac.google.oauth :as oauth]
     [isaac.google.push :as push]
     [isaac.google.tenants :as tenants]
-    [isaac.llm.auth.store :as auth-store]
-    [isaac.logger :as log]
-    [isaac.nexus :as nexus]
-    [isaac.tool.memory :as memory])
+    [isaac.agent.llm.auth.store :as auth-store]
+    [isaac.foundation.logger :as log]
+    [isaac.foundation.nexus :as nexus]
+    [isaac.agent.tool.memory :as memory])
   (:import
     (java.net URLDecoder)
     (java.time Instant)))

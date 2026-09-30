@@ -1,11 +1,11 @@
 (ns isaac.google.registration-spec
   (:require
-    [isaac.fs :as fs]
+    [isaac.foundation.fs :as fs]
     [isaac.google.events]
     [isaac.google.health]
     [isaac.google.registration :as sut]
     [isaac.google.tenants :as tenants]
-    [isaac.nexus :as nexus]
+    [isaac.foundation.nexus :as nexus]
     [speclj.core :refer :all])
   (:import (java.time Instant)))
 

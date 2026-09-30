@@ -19,11 +19,11 @@
     [clojure.edn :as edn]
     [clojure.pprint :as pprint]
     [clojure.string :as str]
-    [isaac.comm.delivery.queue :as queue]
-    [isaac.fs :as fs]
+    [isaac.agent.comm.delivery.queue :as queue]
+    [isaac.foundation.fs :as fs]
     [isaac.google.tenants :as tenants]
-    [isaac.logger :as log]
-    [isaac.nexus :as nexus])
+    [isaac.foundation.logger :as log]
+    [isaac.foundation.nexus :as nexus])
   (:import (java.time Duration Instant)))
 
 (def DEFAULT-SILENT-HOURS 6)

@@ -1,7 +1,7 @@
 (ns isaac.google.oauth
   (:require
     [clojure.string :as str]
-    [isaac.llm.http :as llm-http])
+    [isaac.agent.llm.http :as llm-http])
   (:import (java.net URLEncoder)))
 
 (def AUTH-URL "https://accounts.google.com/o/oauth2/v2/auth")

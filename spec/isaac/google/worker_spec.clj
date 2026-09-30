@@ -1,12 +1,12 @@
 (ns isaac.google.worker-spec
   (:require
-    [isaac.fs :as fs]
+    [isaac.foundation.fs :as fs]
     [isaac.google.handler :as handler]
     [isaac.google.inbox :as inbox]
     [isaac.google.tenants :as tenants]
     [isaac.google.worker :as sut]
-    [isaac.logger :as log]
-    [isaac.nexus :as nexus]
+    [isaac.foundation.logger :as log]
+    [isaac.foundation.nexus :as nexus]
     [speclj.core :refer :all]))
 
 (def ROOT "/test/isaac")

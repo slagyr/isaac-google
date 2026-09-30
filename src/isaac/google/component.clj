@@ -11,14 +11,14 @@
    timers — a host that starts no background services still answers pushes
    (isaac-1zkz)."
   (:require
-    [isaac.component.factory :as component-factory]
-    [isaac.component.protocol :as component]
-    [isaac.config.loader :as loader]
+    [isaac.foundation.component.factory :as component-factory]
+    [isaac.foundation.component.protocol :as component]
+    [isaac.foundation.config.loader :as loader]
     [isaac.google.door :as door]
     [isaac.google.registration :as registration]
     [isaac.google.worker :as worker]
-    [isaac.nexus :as nexus]
-    [isaac.scheduler.runtime :as scheduler]))
+    [isaac.foundation.nexus :as nexus]
+    [isaac.foundation.scheduler.runtime :as scheduler]))
 
 (def default-tick-ms
   "The registration tick is hourly. What it does is slow work: renewals are
@@ -47,7 +47,7 @@
   [{:keys [tick-ms inbox-ms config register-identity!]
     :or   {tick-ms default-tick-ms inbox-ms default-inbox-ms}}]
   (let [shared (or (nexus/get :scheduler)
-                   (throw (ex-info "google registration requires :scheduler in isaac.nexus" {})))]
+                   (throw (ex-info "google registration requires :scheduler in isaac.foundation.nexus" {})))]
     (register-door! config register-identity!)
     ;; An :interval trigger fires after its first full period. A restart must
     ;; not wait an hour to reconcile subscriptions and judge health, so one

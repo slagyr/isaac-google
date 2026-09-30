@@ -1,7 +1,7 @@
 (ns isaac.google.module-spec
   (:require
     [clojure.edn :as edn]
-    [isaac.module.protocol]
+    [isaac.foundation.module.protocol]
     [isaac.google.config :as config]
     [isaac.google.door :as door]
     [isaac.google.module :as sut]
@@ -14,7 +14,7 @@
 (describe "isaac.google.module"
 
   (it "returns a module"
-    (should (satisfies? isaac.module.protocol/Module (sut/create-module))))
+    (should (satisfies? isaac.foundation.module.protocol/Module (sut/create-module))))
 
   (it "declares its module id"
     (should= :isaac.google (:id manifest)))

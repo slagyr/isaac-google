@@ -3,8 +3,8 @@
   (:require
     [clojure.edn :as edn]
     [clojure.pprint :as pprint]
-    [isaac.fs :as fs]
-    [isaac.nexus :as nexus]))
+    [isaac.foundation.fs :as fs]
+    [isaac.foundation.nexus :as nexus]))
 
 (def seen-bound 4096)
 

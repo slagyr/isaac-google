@@ -5,9 +5,9 @@
     [clojure.string :as str]
     [gherclj.core :as g :refer [defgiven defwhen defthen helper!]]
     [isaac.foundation.cli-steps :as fcli]
-    [isaac.fs :as fs]
+    [isaac.foundation.fs :as fs]
     [cheshire.core :as json]
-    [isaac.config.loader :as loader]
+    [isaac.foundation.config.loader :as loader]
     [isaac.google.cli :as google-cli]
     [isaac.google.component :as google-component]
     [isaac.google.door :as door]
@@ -24,13 +24,13 @@
     [isaac.http.http :as http]
     [isaac.http.oidc :as oidc]
     [isaac.http.oidc-fixture :as oidc-fixture]
-    [isaac.logger :as log]
-    [isaac.main :as main]
-    [isaac.tool.memory :as memory]
-    [isaac.llm.auth.store :as auth-store]
-    [isaac.llm.http :as llm-http]
-    [isaac.module.discovery :as discovery]
-    [isaac.nexus :as nexus])
+    [isaac.foundation.logger :as log]
+    [isaac.foundation.main :as main]
+    [isaac.agent.tool.memory :as memory]
+    [isaac.agent.llm.auth.store :as auth-store]
+    [isaac.agent.llm.http :as llm-http]
+    [isaac.foundation.module.discovery :as discovery]
+    [isaac.foundation.nexus :as nexus])
   (:import
     (java.net URLDecoder URLEncoder)
     (java.util Base64)))
@@ -97,7 +97,7 @@
       {:error :unknown :message "no Google token stub configured"}))
 
 (defn- record-google-http! [url headers body]
-  ;; :key "value" satisfies isaac.llm.providers-steps' match-object, which
+  ;; :key "value" satisfies isaac.agent.llm.providers-steps' match-object, which
   ;; conses the table header ["key" "value"] onto :rows (set-of-maps vs set-of-strings).
   (let [req {:url url :headers headers :body body :stream false :key "value"}]
     (when-let [calls (g/get :google-http-calls)]
@@ -383,10 +383,10 @@
       {}))
 
 (defn google-runtime-component-starts
-  "What isaac.runner does at boot and a feature server does not: start this
+  "What isaac.foundation.runner does at boot and a feature server does not: start this
    module's runtime component, whose first act is registering one push-door
    trust rule per configured organization. Components belong to the runner
-   alone (isaac.component.runtime: \"Only isaac.runner invokes start-all!\"),
+   alone (isaac.foundation.component.runtime: \"Only isaac.foundation.runner invokes start-all!\"),
    so a scenario that needs a tenanted door says so (isaac-1zkz)."
   []
   (nexus/-with-nested-nexus {:fs (feature-fs) :root (feature-root)}

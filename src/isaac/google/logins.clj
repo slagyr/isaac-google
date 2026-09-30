@@ -14,8 +14,8 @@
   (:require
     [clojure.edn :as edn]
     [clojure.pprint :as pprint]
-    [isaac.fs :as fs]
-    [isaac.nexus :as nexus])
+    [isaac.foundation.fs :as fs]
+    [isaac.foundation.nexus :as nexus])
   (:import
     (java.security MessageDigest SecureRandom)
     (java.time Duration Instant)

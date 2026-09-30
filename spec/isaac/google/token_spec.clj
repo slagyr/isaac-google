@@ -1,11 +1,11 @@
 (ns isaac.google.token-spec
   (:require
-    [isaac.fs :as fs]
+    [isaac.foundation.fs :as fs]
     [isaac.google.oauth :as oauth]
     [isaac.google.tenants :as tenants]
     [isaac.google.token :as sut]
-    [isaac.llm.auth.store :as auth-store]
-    [isaac.nexus :as nexus]
+    [isaac.agent.llm.auth.store :as auth-store]
+    [isaac.foundation.nexus :as nexus]
     [speclj.core :refer [around context describe it should= should-be-nil should-contain should-not-contain should-throw with]]))
 
 (def root "/test/google-token")

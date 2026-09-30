@@ -13,8 +13,8 @@
     [isaac.google.handler :as handler]
     [isaac.google.inbox :as inbox]
     [isaac.google.tenants :as tenants]
-    [isaac.logger :as log]
-    [isaac.nexus :as nexus]))
+    [isaac.foundation.logger :as log]
+    [isaac.foundation.nexus :as nexus]))
 
 (defn tick!
   "Drain every pending record once on the caller thread."
