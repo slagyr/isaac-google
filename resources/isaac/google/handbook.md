@@ -1,15 +1,3 @@
-<!--
-Lint convention (isaac.google.handbook-chapter-spec, isaac-8m6y, mirroring
-isaac.foundation's own): a backtick `config:<dotted.path>` reference (no
-angle-bracket placeholder inside the path) is checked against the composed
-config schema, and the word right after `isaac ` in `isaac <command>` is
-checked against the registered top-level CLI commands. Keep both literal
-and real when you edit this file — the lint fails the build once either
-drifts from what Isaac actually exposes. `<placeholder>` shapes (e.g.
-`config:<dotted.path>` itself, or an angle-bracket organization id) are
-intentionally skipped.
--->
-
 # isaac.google — Google Workspace plumbing
 
 You are a crew running inside Isaac. This chapter covers **isaac-google**:
