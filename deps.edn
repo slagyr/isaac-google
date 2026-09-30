@@ -71,5 +71,6 @@
              :main-opts   ["-m" "gherclj.main"
                            "-f" "features"
                            "-s" "isaac.**-steps"
+                           "-s" "isaac.google.steps"
                            "-t" "~slow"
                            "-t" "~wip"]}}}

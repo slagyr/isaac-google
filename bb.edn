@@ -43,7 +43,7 @@
                                                     :deps/root "spec-support"}}
 
  :tasks
- {config-bypass-lint {:doc "Fail on raw config slurp/read outside isaac.config.* (isaac-foundation-test-support)"
+ {config-bypass-lint {:doc "Fail on raw config slurp/read outside isaac.foundation.config.* (isaac-foundation-test-support)"
                       :requires ([isaac.foundation.config-bypass-lint :as lint])
                       :task (apply lint/lint! (or (seq *command-line-args*) ["src"]))}
 
