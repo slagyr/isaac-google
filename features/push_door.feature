@@ -17,6 +17,7 @@ Feature: Google Pub/Sub push door
       | google.tonotop.topic                | projects/marigold/topics/isaac               |
       | google.tonotop.push.endpoint        | https://isaac.example/google/pubsub          |
       | google.tonotop.push.service-account | pubsub-push@marigold.iam.gserviceaccount.com |
+      | http.oidc.jwks-alert-threshold      | 1                                             |
     And Google signs push tokens with a test key
     And the skybeam fixture module handles Google events of type "google.workspace.chat.message.v1.created"
     And the Isaac server is started

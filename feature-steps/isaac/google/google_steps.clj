@@ -1,4 +1,4 @@
-(ns isaac.google.steps
+(ns isaac.google.google-steps
   "Module-owned Google login feature steps. One helper each — everything
    else is existing foundation/agent steps."
   (:require
@@ -35,7 +35,7 @@
     (java.net URLDecoder URLEncoder)
     (java.util Base64)))
 
-(helper! isaac.google.steps)
+(helper! isaac.google.google-steps)
 
 (def ^:private default-events-state
   {:subs {} :grant-expires nil :rejects {}})
@@ -232,34 +232,34 @@
   (g/should-not (str/includes? (reported-error-message) text)))
 
 (defgiven #"the Google token endpoint returns access token \"([^\"]+)\" and refresh token \"([^\"]+)\" expiring in (\d+)"
-  isaac.google.steps/google-token-endpoint-returns-access-and-refresh)
+  isaac.google.google-steps/google-token-endpoint-returns-access-and-refresh)
 
 (defgiven #"the Google token endpoint returns access token \"([^\"]+)\" expiring in (\d+)"
-  isaac.google.steps/google-token-endpoint-returns-access)
+  isaac.google.google-steps/google-token-endpoint-returns-access)
 
 (defgiven "the Google token endpoint rejects refresh with {error:string}"
-  isaac.google.steps/google-token-endpoint-rejects-refresh)
+  isaac.google.google-steps/google-token-endpoint-rejects-refresh)
 
 (defgiven "the google auth store has an expired access token with refresh {rt:string}"
-  isaac.google.steps/google-auth-store-has-expired-access)
+  isaac.google.google-steps/google-auth-store-has-expired-access)
 
 (defgiven "the skybeam fixture module contributes the Google scope {scope:string}"
-  isaac.google.steps/skybeam-contributes-google-scope)
+  isaac.google.google-steps/skybeam-contributes-google-scope)
 
 (defwhen "the google access token is resolved"
-  isaac.google.steps/google-access-token-is-resolved)
+  isaac.google.google-steps/google-access-token-is-resolved)
 
 (defthen "the google auth store has access {at:string} and refresh {rt:string}"
-  isaac.google.steps/google-auth-store-has-access-and-refresh)
+  isaac.google.google-steps/google-auth-store-has-access-and-refresh)
 
 (defthen "the error mentions {text:string}"
-  isaac.google.steps/error-mentions)
+  isaac.google.google-steps/error-mentions)
 
 (defthen "the error does not mention {text:string}"
-  isaac.google.steps/error-does-not-mention)
+  isaac.google.google-steps/error-does-not-mention)
 
 (defthen #"the google auth store for tenant \"([^\"]+)\" has access \"([^\"]+)\" and refresh \"([^\"]+)\""
-  isaac.google.steps/google-auth-store-for-tenant-has-access-and-refresh)
+  isaac.google.google-steps/google-auth-store-for-tenant-has-access-and-refresh)
 
 (def ^:private received* (atom {}))
 (def ^:private throwers* (atom #{}))
@@ -450,82 +450,82 @@
     (g/should= n (count records))))
 
 (defgiven "Google signs push tokens with a test key"
-  isaac.google.steps/google-signs-with-test-key)
+  isaac.google.google-steps/google-signs-with-test-key)
 
 (defgiven #"the skybeam fixture module handles Google events of type \"([^\"]+)\""
-  isaac.google.steps/skybeam-handles)
+  isaac.google.google-steps/skybeam-handles)
 
 (defgiven #"the longwave fixture module handles Google events of type \"([^\"]+)\""
-  isaac.google.steps/longwave-handles)
+  isaac.google.google-steps/longwave-handles)
 
 (defgiven "the skybeam handler throws"
-  isaac.google.steps/skybeam-throws)
+  isaac.google.google-steps/skybeam-throws)
 
 (defgiven #"the next push token has audience \"([^\"]+)\""
-  isaac.google.steps/next-token-audience)
+  isaac.google.google-steps/next-token-audience)
 
 (defgiven #"the next push token is from \"([^\"]+)\""
-  isaac.google.steps/next-token-from)
+  isaac.google.google-steps/next-token-from)
 
 (defgiven "the next push token is unsigned"
-  isaac.google.steps/next-token-unsigned)
+  isaac.google.google-steps/next-token-unsigned)
 
 (defgiven "the next push token is signed by a key Google never published"
-  isaac.google.steps/next-token-foreign-key)
+  isaac.google.google-steps/next-token-foreign-key)
 
 (defgiven "the next push token is expired"
-  isaac.google.steps/next-token-expired)
+  isaac.google.google-steps/next-token-expired)
 
 (defgiven #"the next push token is issued by \"([^\"]+)\""
-  isaac.google.steps/next-token-issuer)
+  isaac.google.google-steps/next-token-issuer)
 
 (defgiven "Google's JWKS is unreachable"
-  isaac.google.steps/google-jwks-unreachable)
+  isaac.google.google-steps/google-jwks-unreachable)
 
 (defgiven "Google's JWKS misses the kid then serves it"
-  isaac.google.steps/google-jwks-misses-then-serves)
+  isaac.google.google-steps/google-jwks-misses-then-serves)
 
 (defthen "Google's JWKS was fetched {n:int} times"
-  isaac.google.steps/google-jwks-fetched-times)
+  isaac.google.google-steps/google-jwks-fetched-times)
 
 (defwhen "Google pushes {n:int} messages with forged tokens"
-  isaac.google.steps/google-pushes-forged)
+  isaac.google.google-steps/google-pushes-forged)
 
 (defgiven #"a fixture route (\w+) (/[^\s]+) requires scope :([^\s]+)$"
-  isaac.google.steps/fixture-route-unquoted)
+  isaac.google.google-steps/fixture-route-unquoted)
 
 (defwhen #"Google pushes message \"([^\"]+)\" of type \"([^\"]+)\" with data:"
-  isaac.google.steps/google-pushes)
+  isaac.google.google-steps/google-pushes)
 
 (defgiven "the Google runtime component is started"
-  isaac.google.steps/google-runtime-component-starts)
+  isaac.google.google-steps/google-runtime-component-starts)
 
 (defwhen #"Google pushes message \"([^\"]+)\" of type \"([^\"]+)\" signed by \"([^\"]+)\" on \"([^\"]+)\" with data:"
-  isaac.google.steps/google-pushes-signed-on)
+  isaac.google.google-steps/google-pushes-signed-on)
 
 (defwhen #"Google pushes a Gmail watch message \"([^\"]+)\" with data:"
-  isaac.google.steps/google-pushes-gmail)
+  isaac.google.google-steps/google-pushes-gmail)
 
 (defwhen #"Google pushes to GET (/[^\"]*)"
-  isaac.google.steps/google-pushes-to)
+  isaac.google.google-steps/google-pushes-to)
 
 (defwhen "the inbox worker ticks"
-  isaac.google.steps/inbox-worker-ticks)
+  isaac.google.google-steps/inbox-worker-ticks)
 
 (defthen #"the skybeam handler received message \"([^\"]+)\""
-  isaac.google.steps/skybeam-received)
+  isaac.google.google-steps/skybeam-received)
 
 (defthen #"the skybeam handler received message \"([^\"]+)\" once"
-  isaac.google.steps/skybeam-received-once)
+  isaac.google.google-steps/skybeam-received-once)
 
 (defthen "the skybeam handler received no messages"
-  isaac.google.steps/skybeam-received-none)
+  isaac.google.google-steps/skybeam-received-none)
 
 (defthen #"the longwave handler received message \"([^\"]+)\""
-  isaac.google.steps/longwave-received)
+  isaac.google.google-steps/longwave-received)
 
 (defthen #"the inbox holds (\d+) record for message \"([^\"]+)\""
-  isaac.google.steps/inbox-holds)
+  isaac.google.google-steps/inbox-holds)
 
 ;; region ----- Workspace Events / registration timer -----
 
@@ -663,19 +663,19 @@
       (thunk))))
 
 (defgiven "the Workspace Events API has no subscriptions"
-  isaac.google.steps/workspace-events-has-no-subscriptions)
+  isaac.google.google-steps/workspace-events-has-no-subscriptions)
 
 (defgiven #"the Workspace Events API has subscription \"([^\"]+)\" for \"([^\"]+)\" expiring at \"([^\"]+)\""
-  isaac.google.steps/workspace-events-has-subscription)
+  isaac.google.google-steps/workspace-events-has-subscription)
 
 (defgiven #"the Workspace Events API grants subscriptions expiring at \"([^\"]+)\""
-  isaac.google.steps/workspace-events-grants)
+  isaac.google.google-steps/workspace-events-grants)
 
 (defgiven #"the Workspace Events API rejects creates for \"([^\"]+)\" with (\d+) \"([^\"]+)\""
-  isaac.google.steps/workspace-events-rejects)
+  isaac.google.google-steps/workspace-events-rejects)
 
 (defwhen "the google registration timer ticks"
-  isaac.google.steps/google-registration-timer-ticks)
+  isaac.google.google-steps/google-registration-timer-ticks)
 
 (defn last-google-event-was-at [key ts]
   (let [fs*  (feature-fs)
@@ -684,7 +684,7 @@
       (google-health/record-last-event! root key ts))))
 
 (defgiven #"the last Google event for \"([^\"]+)\" was at \"([^\"]+)\""
-  isaac.google.steps/last-google-event-was-at)
+  isaac.google.google-steps/last-google-event-was-at)
 
 (defn google-heartbeat-arrived
   "What the door does when the externally-published heartbeat arrives: it
@@ -697,16 +697,16 @@
       (google-health/record-heartbeat! root (keyword tenant) ts))))
 
 (defwhen #"a Google heartbeat for \"([^\"]+)\" arrived at \"([^\"]+)\""
-  isaac.google.steps/google-heartbeat-arrived)
+  isaac.google.google-steps/google-heartbeat-arrived)
 
 (defwhen "the test clock advances {n:int} milliseconds"
-  isaac.google.steps/test-clock-advances)
+  isaac.google.google-steps/test-clock-advances)
 
 (defthen #"no outbound HTTP request to \"([^\"]+)\" was made"
-  isaac.google.steps/no-outbound-http-to)
+  isaac.google.google-steps/no-outbound-http-to)
 
 (defthen #"(\d+) outbound HTTP requests to \"([^\"]+)\" for \"([^\"]+)\" were made"
-  isaac.google.steps/outbound-http-count-for-space)
+  isaac.google.google-steps/outbound-http-count-for-space)
 
 ;; region ----- People API (who spoke) -----
 
@@ -795,28 +795,28 @@
     (g/should= scope (:scope (first warns)))))
 
 (defgiven #"the Google People API knows \"([^\"]+)\" as \"([^\"]+)\" with email \"([^\"]+)\""
-  isaac.google.steps/people-api-knows)
+  isaac.google.google-steps/people-api-knows)
 
 (defgiven #"the Google People API refuses with (\d+) \"([^\"]+)\""
-  isaac.google.steps/people-api-refuses)
+  isaac.google.google-steps/people-api-refuses)
 
 (defwhen #"the person \"([^\"]+)\" is resolved with display name \"([^\"]+)\""
-  isaac.google.steps/person-is-resolved-with-display-name)
+  isaac.google.google-steps/person-is-resolved-with-display-name)
 
 (defwhen #"the person \"([^\"]+)\" is resolved$"
-  isaac.google.steps/person-is-resolved)
+  isaac.google.google-steps/person-is-resolved)
 
 (defthen #"the person renders as \"([^\"]+)\""
-  isaac.google.steps/person-renders-as)
+  isaac.google.google-steps/person-renders-as)
 
 (defthen "the person has no email"
-  isaac.google.steps/person-has-no-email)
+  isaac.google.google-steps/person-has-no-email)
 
 (defthen #"the People API was asked (\d+) times? for \"([^\"]+)\" with fields \"([^\"]+)\""
-  isaac.google.steps/people-api-asked)
+  isaac.google.google-steps/people-api-asked)
 
 (defthen #"exactly one warning named the missing \"([^\"]+)\" scope"
-  isaac.google.steps/one-scope-warning)
+  isaac.google.google-steps/one-scope-warning)
 
 ;; region ----- the login that finishes at this host (isaac-2abl) -----
 ;;
@@ -920,28 +920,28 @@
   (g/should (str/includes? (str (:body (g/get :http-response))) text)))
 
 (defwhen #"the operator starts \"([^\"]+)\" and leaves it waiting"
-  isaac.google.steps/login-left-waiting)
+  isaac.google.google-steps/login-left-waiting)
 
 (defthen #"the consent URL sends the browser back to \"([^\"]+)\""
-  isaac.google.steps/consent-redirects-to)
+  isaac.google.google-steps/consent-redirects-to)
 
 (defthen "the consent URL carries a PKCE challenge"
-  isaac.google.steps/consent-carries-pkce)
+  isaac.google.google-steps/consent-carries-pkce)
 
 (defthen #"a pending login is recorded for organization \"([^\"]+)\""
-  isaac.google.steps/pending-login-recorded)
+  isaac.google.google-steps/pending-login-recorded)
 
 (defgiven #"a login for organization \"([^\"]+)\" under state \"([^\"]+)\" started (\d+) minutes ago"
-  isaac.google.steps/login-started-minutes-ago)
+  isaac.google.google-steps/login-started-minutes-ago)
 
 (defwhen #"Google redirects to the callback with the recorded state and code \"([^\"]+)\""
-  isaac.google.steps/callback-with-recorded-state)
+  isaac.google.google-steps/callback-with-recorded-state)
 
 (defwhen #"Google redirects to the callback with state \"([^\"]+)\" and code \"([^\"]+)\""
-  isaac.google.steps/callback-with-state)
+  isaac.google.google-steps/callback-with-state)
 
 (defthen "the response body contains {text:string}"
-  isaac.google.steps/response-body-contains)
+  isaac.google.google-steps/response-body-contains)
 
 
 (defn consent-scopes
@@ -966,9 +966,9 @@
   (g/should-include scope (consent-scopes)))
 
 (defthen "the consent URL asks for no Cloud Platform scope"
-  isaac.google.steps/consent-has-no-cloud-scope)
+  isaac.google.google-steps/consent-has-no-cloud-scope)
 
 (defthen #"the consent URL asks for \"([^\"]+)\""
-  isaac.google.steps/consent-asks-for-scope)
+  isaac.google.google-steps/consent-asks-for-scope)
 
 ;; endregion
