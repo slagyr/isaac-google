@@ -92,12 +92,12 @@
 
     (it "conforms a config of several organizations, keeping every one"
       (let [conformed (lexicon/conform sut/google-schema
-                                       {:tonotop {:project "marigold"
+                                       {:marigold {:project "marigold"
                                                   :oauth   {:client-id "cid-t" :client-secret "shh"}}
                                         :acme    {:project "acme-prod"
                                                   :oauth   {:client-id "cid-a" :client-secret "shh"}}})]
-        (should= "marigold" (get-in conformed [:tonotop :project]))
-        (should= "cid-t" (get-in conformed [:tonotop :oauth :client-id]))
+        (should= "marigold" (get-in conformed [:marigold :project]))
+        (should= "cid-t" (get-in conformed [:marigold :oauth :client-id]))
         (should= "acme-prod" (get-in conformed [:acme :project]))
         (should= "cid-a" (get-in conformed [:acme :oauth :client-id]))))
 

@@ -4,9 +4,9 @@
     [isaac.google.tenants :as tenants]
     [speclj.core :refer :all]))
 
-(def micah
-  {:names          [{:displayName "Micah Martin" :metadata {:primary true}}]
-   :emailAddresses [{:value "micah@tonotop.com" :metadata {:primary true}}]})
+(def hieronymus
+  {:names          [{:displayName "Hieronymus Finch" :metadata {:primary true}}]
+   :emailAddresses [{:value "hieronymus@marigold.example" :metadata {:primary true}}]})
 
 (defn- with-fetch [response f]
   (let [calls (atom [])]
@@ -22,14 +22,14 @@
   (context "resolve"
 
     (it "answers the display name and Workspace email for a users/<id>"
-      (let [[entry calls] (with-fetch micah #(sut/resolve "users/1234"))]
+      (let [[entry calls] (with-fetch hieronymus #(sut/resolve "users/1234"))]
         (should= "users/1234" (:user entry))
-        (should= "Micah Martin" (:display-name entry))
-        (should= "micah@tonotop.com" (:email entry))
+        (should= "Hieronymus Finch" (:display-name entry))
+        (should= "hieronymus@marigold.example" (:email entry))
         (should= ["users/1234"] calls)))
 
     (it "asks Google once inside the memo TTL"
-      (let [[_ calls] (with-fetch micah #(do (sut/resolve "users/1234")
+      (let [[_ calls] (with-fetch hieronymus #(do (sut/resolve "users/1234")
                                              (sut/resolve "users/1234")))]
         (should= ["users/1234"] calls)))
 
@@ -37,7 +37,7 @@
       (let [clock (atom 0)
             calls (atom [])]
         (with-redefs [sut/now-ms (fn [] @clock)
-                      sut/fetch! (fn [user] (swap! calls conj user) micah)]
+                      sut/fetch! (fn [user] (swap! calls conj user) hieronymus)]
           (sut/resolve "users/1234")
           (reset! clock (* 1000 (inc sut/TTL-SECONDS)))
           (sut/resolve "users/1234"))
@@ -45,9 +45,9 @@
 
     (it "fails soft when the lookup errors: no email, the known display name kept"
       (let [[entry _] (with-fetch {:error :api-error :status 500 :message "boom"}
-                        #(sut/resolve "users/1234" {:display-name "Micah"}))]
+                        #(sut/resolve "users/1234" {:display-name "Hieronymus"}))]
         (should= "users/1234" (:user entry))
-        (should= "Micah" (:display-name entry))
+        (should= "Hieronymus" (:display-name entry))
         (should-be-nil (:email entry))))
 
     (it "fails soft when the seam throws"
@@ -73,28 +73,28 @@
 
     (it "records the organization the sighting came from"
       (let [[entry _] (binding [tenants/*tenant* :acme]
-                        (with-fetch micah #(sut/resolve "users/1234")))]
+                        (with-fetch hieronymus #(sut/resolve "users/1234")))]
         (should= :acme (:tenant entry))))
 
     (it "asks each organization for itself rather than reusing the other's answer"
       (let [calls (atom [])]
-        (with-redefs [sut/fetch! (fn [user] (swap! calls conj [tenants/*tenant* user]) micah)]
-          (binding [tenants/*tenant* :tonotop] (sut/resolve "users/1234"))
+        (with-redefs [sut/fetch! (fn [user] (swap! calls conj [tenants/*tenant* user]) hieronymus)]
+          (binding [tenants/*tenant* :marigold] (sut/resolve "users/1234"))
           (binding [tenants/*tenant* :acme] (sut/resolve "users/1234"))
           (binding [tenants/*tenant* :acme] (sut/resolve "users/1234")))
-        (should= [[:tonotop "users/1234"] [:acme "users/1234"]] @calls))))
+        (should= [[:marigold "users/1234"] [:acme "users/1234"]] @calls))))
 
   (context "render"
 
     (it "renders name and email"
-      (should= "Micah Martin <micah@tonotop.com>"
-               (sut/render {:display-name "Micah Martin" :email "micah@tonotop.com"})))
+      (should= "Hieronymus Finch <hieronymus@marigold.example>"
+               (sut/render {:display-name "Hieronymus Finch" :email "hieronymus@marigold.example"})))
 
     (it "renders the email alone when the name is unknown"
-      (should= "micah@tonotop.com" (sut/render {:email "micah@tonotop.com"})))
+      (should= "hieronymus@marigold.example" (sut/render {:email "hieronymus@marigold.example"})))
 
     (it "renders the name alone when the email is unknown"
-      (should= "Micah" (sut/render {:display-name "Micah" :user "users/1234"})))
+      (should= "Hieronymus" (sut/render {:display-name "Hieronymus" :user "users/1234"})))
 
     (it "falls back to the users/<id>"
       (should= "users/1234" (sut/render {:user "users/1234"})))))

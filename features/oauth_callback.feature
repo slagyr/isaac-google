@@ -15,25 +15,25 @@ Feature: The login finishes at the Isaac host
   Background:
     Given an Isaac root at "target/test-state"
     And config:
-      | google.tonotop.oauth.client-id     | isaac-test.apps.googleusercontent.com |
-      | google.tonotop.oauth.client-secret | shh                                   |
-      | google.tonotop.oauth.account       | yopp@tonotop.com                      |
-      | google.tonotop.oauth.redirect-base | https://isaac.example                 |
-      | google.tonotop.push.endpoint       | https://isaac.example/google/pubsub   |
+      | google.marigold.oauth.client-id     | isaac-test.apps.googleusercontent.com |
+      | google.marigold.oauth.client-secret | shh                                   |
+      | google.marigold.oauth.account       | isaac@marigold.example                      |
+      | google.marigold.oauth.redirect-base | https://isaac.example                 |
+      | google.marigold.push.endpoint       | https://isaac.example/google/pubsub   |
     And the Isaac server is started
     And the Google runtime component is started
 
   Scenario: the operator approves at Google and this host does the rest
     Given the Google token endpoint returns access token "at-1" and refresh token "rt-1" expiring in 3600
-    When the operator starts "google login --tenant tonotop" and leaves it waiting
+    When the operator starts "google login --tenant marigold" and leaves it waiting
     Then the stdout eventually contains "https://accounts.google.com/o/oauth2/v2/auth"
     And the consent URL sends the browser back to "https://isaac.example/google/oauth/callback"
     And the consent URL carries a PKCE challenge
-    And a pending login is recorded for organization "tonotop"
+    And a pending login is recorded for organization "marigold"
     When Google redirects to the callback with the recorded state and code "4/0AbCd"
     Then the response status is 200
-    And the response body contains "Signed in as yopp@tonotop.com for organization tonotop. You can close this tab."
-    And the google auth store for tenant "tonotop" has access "at-1" and refresh "rt-1"
+    And the response body contains "Signed in as isaac@marigold.example for organization marigold. You can close this tab."
+    And the google auth store for tenant "marigold" has access "at-1" and refresh "rt-1"
     And an outbound HTTP request to "https://oauth2.googleapis.com/token" matches:
       | key               | value                                       |
       | body.grant_type   | authorization_code                          |
@@ -41,12 +41,12 @@ Feature: The login finishes at the Isaac host
       | body.redirect_uri | https://isaac.example/google/oauth/callback |
     And the log has entries matching:
       | level | event                   | tenant  |
-      | :info | :google/login-completed | tonotop |
-    And the stdout eventually contains "Signed in for organization tonotop"
+      | :info | :google/login-completed | marigold |
+    And the stdout eventually contains "Signed in for organization marigold"
     And the exit code is 0
 
   Scenario: a state this host is not holding a login under opens nothing
-    Given a login for organization "tonotop" under state "st-coldconsent" started 11 minutes ago
+    Given a login for organization "marigold" under state "st-coldconsent" started 11 minutes ago
     When Google redirects to the callback with state "st-nosuchstateatall" and code "4/0AbCd"
     Then the response status is 400
     And the response body contains "unknown to this Isaac"

@@ -25,7 +25,7 @@
                (sut/unwrap body))))
 
   (it "routes a Gmail watch with no ce-type to :gmail/watch"
-    (let [data {:emailAddress "yopp@tonotop.com" :historyId "12345"}
+    (let [data {:emailAddress "isaac@marigold.example" :historyId "12345"}
           body {:message {:messageId "m-7"
                           :data      (b64-json data)}}]
       (should= {:message-id   "m-7"
@@ -44,8 +44,8 @@
                             :message      {:messageId "m-9" :data (b64-json {:historyId "1"})}}))))
 
   (it "keeps a string-keyed subscription"
-    (should= "projects/tonotop/subscriptions/isaac-chat"
+    (should= "projects/marigold/subscriptions/isaac-chat"
              (:subscription
-               (sut/unwrap {"subscription" "projects/tonotop/subscriptions/isaac-chat"
+               (sut/unwrap {"subscription" "projects/marigold/subscriptions/isaac-chat"
                             "message"      {"messageId" "m-10"}}))))
   )

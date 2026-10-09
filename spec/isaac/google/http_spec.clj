@@ -18,7 +18,7 @@
     (java.util Base64)))
 
 (def two-tenant-config
-  {:google {:tonotop {:project "marigold"}
+  {:google {:marigold {:project "marigold"}
             :acme    {:project "acme-prod"}}})
 
 (defn- b64-json [m]
@@ -62,16 +62,16 @@
     (it "keeps each organization's push under its own tenant"
       (sut/handler (push-request {:id           "m-2"
                                   :subscription "projects/marigold/subscriptions/isaac"
-                                  :principal    :google-pubsub/tonotop
+                                  :principal    :google-pubsub/marigold
                                   :config       two-tenant-config}))
       (sut/handler (push-request {:id           "m-3"
                                   :subscription "projects/acme-prod/subscriptions/isaac"
                                   :principal    :google-pubsub/acme
                                   :config       two-tenant-config}))
-      (should= [:acme :tonotop]
+      (should= [:acme :marigold]
                (sort (mapv :tenant (inbox/pending "/test/isaac")))))
 
-    ;; Acme's service account proved itself, but the push arrived on tonotop's
+    ;; Acme's service account proved itself, but the push arrived on marigold's
     ;; subscription. One of the two claims is false; keep nothing.
     (it "refuses a push whose subscription and service account disagree"
       (let [response (sut/handler (push-request {:id           "m-4"
@@ -87,9 +87,9 @@
     (it "stamps a one-organization host's push with that organization"
       (sut/handler (push-request {:id           "m-5"
                                   :subscription "projects/marigold/subscriptions/isaac"
-                                  :principal    :google-pubsub/tonotop
-                                  :config       {:google {:tonotop {:project "marigold"}}}}))
-      (should= [:tonotop] (mapv :tenant (inbox/pending "/test/isaac"))))
+                                  :principal    :google-pubsub/marigold
+                                  :config       {:google {:marigold {:project "marigold"}}}}))
+      (should= [:marigold] (mapv :tenant (inbox/pending "/test/isaac"))))
 
     ;; The flat shape isaac-1zkz accepted names no organization, so nothing on
     ;; this host could own the push. Refuse it rather than keep an event no
@@ -97,7 +97,7 @@
     (it "refuses a push when no organization is configured"
       (let [response (sut/handler (push-request {:id           "m-6"
                                                  :subscription "projects/marigold/subscriptions/isaac"
-                                                 :principal    :google-pubsub/tonotop
+                                                 :principal    :google-pubsub/marigold
                                                  :config       {:google {:project "marigold"}}}))]
         (should= 401 (:status response))
         (should= [] (inbox/pending "/test/isaac"))
@@ -112,17 +112,17 @@
     (it "records the heartbeat and keeps nothing for the worker"
       (let [response (sut/handler (heartbeat-request {:id           "hb-1"
                                                       :subscription "projects/marigold/subscriptions/isaac"
-                                                      :principal    :google-pubsub/tonotop
+                                                      :principal    :google-pubsub/marigold
                                                       :config       two-tenant-config}))]
         (should= 204 (:status response))
         (should= [] (inbox/pending "/test/isaac"))
-        (should= {:tonotop "2026-09-18T12:00:00Z"}
+        (should= {:marigold "2026-09-18T12:00:00Z"}
                  (:last-heartbeat-at (health/load-state "/test/isaac")))))
 
     (it "does not count as an event from Google"
       (sut/handler (heartbeat-request {:id           "hb-2"
                                        :subscription "projects/marigold/subscriptions/isaac"
-                                       :principal    :google-pubsub/tonotop
+                                       :principal    :google-pubsub/marigold
                                        :config       two-tenant-config}))
       (let [state (health/load-state "/test/isaac")]
         (should= nil (:last-event-at state))
@@ -132,9 +132,9 @@
 ;; ---------------------------------------------------------------------------
 
 (def login-config
-  {:google {:tonotop {:oauth {:client-id     "isaac-test.apps.googleusercontent.com"
+  {:google {:marigold {:oauth {:client-id     "isaac-test.apps.googleusercontent.com"
                               :client-secret "shh"
-                              :account       "yopp@tonotop.com"
+                              :account       "isaac@marigold.example"
                               :redirect-base "https://isaac.example"}
                       :push  {:endpoint "https://isaac.example/google/pubsub"}}}})
 
@@ -147,13 +147,13 @@
 (defn- pending!
   ([state] (pending! state "2026-09-18T12:00:00Z"))
   ([state created-at]
-   (logins/save! "/test/isaac" state {:tenant        :tonotop
+   (logins/save! "/test/isaac" state {:tenant        :marigold
                                       :scopes        ["openid"]
                                       :code-verifier "v-1"
                                       :created-at    created-at})))
 
 (defn- stored-tokens []
-  (auth-store/load-tokens "/test/isaac" "google/tonotop" (fs/instance)))
+  (auth-store/load-tokens "/test/isaac" "google/marigold" (fs/instance)))
 
 (describe "the Google OAuth callback door (isaac-2abl)"
 
@@ -172,7 +172,7 @@
           (pending! "st-abcdefgh")
           (let [response (sut/oauth-callback (callback-request "state=st-abcdefgh&code=4%2F0AbCd"))]
             (should= 200 (:status response))
-            (should-contain "Signed in as yopp@tonotop.com for organization tonotop" (:body response))
+            (should-contain "Signed in as isaac@marigold.example for organization marigold" (:body response))
             (should-contain "You can close this tab" (:body response))))
         (should= "4/0AbCd" (:code @captured))
         (should= "isaac-test.apps.googleusercontent.com" (:client_id @captured))
@@ -194,7 +194,7 @@
         (let [entry (first (filter #(= :google/login-completed (:event %)) @log/captured-logs))]
           (should-not-be-nil entry)
           (should= :info (:level entry))
-          (should= :tonotop (:tenant entry)))))
+          (should= :marigold (:tenant entry)))))
 
     ;; A code, a token or the PKCE verifier in a log line is a credential in a
     ;; log line. None of the three is ever written.
@@ -241,7 +241,7 @@
                             :isaac/config {:google {:acme {:oauth {:client-id "other"}}}})
             response (sut/oauth-callback request)]
         (should= 400 (:status response))
-        (should-contain "tonotop" (:body response))
+        (should-contain "marigold" (:body response))
         (should-be-nil (stored-tokens))))
 
     (it "says so when Google refuses the exchange"

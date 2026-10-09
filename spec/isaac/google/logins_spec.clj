@@ -10,7 +10,7 @@
 (def ROOT "/test/isaac")
 
 (defn- record [created-at]
-  {:tenant        :tonotop
+  {:tenant        :marigold
    :scopes        ["openid"]
    :code-verifier "v-1"
    :created-at    created-at})

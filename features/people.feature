@@ -9,27 +9,27 @@ Feature: Who spoke
   Background:
     Given an Isaac root at "target/test-state"
     And config:
-      | google.tonotop.oauth.client-id     | isaac-test.apps.googleusercontent.com |
-      | google.tonotop.oauth.client-secret | shh                                   |
-      | google.tonotop.oauth.account       | yopp@tonotop.com                      |
+      | google.marigold.oauth.client-id     | isaac-test.apps.googleusercontent.com |
+      | google.marigold.oauth.client-secret | shh                                   |
+      | google.marigold.oauth.account       | isaac@marigold.example                      |
 
   Scenario: a Chat users/<id> resolves to the Workspace name and email
-    Given the Google People API knows "users/1234" as "Micah Martin" with email "micah@tonotop.com"
+    Given the Google People API knows "users/1234" as "Hieronymus Finch" with email "hieronymus@marigold.example"
     When the person "users/1234" is resolved
-    Then the person renders as "Micah Martin <micah@tonotop.com>"
+    Then the person renders as "Hieronymus Finch <hieronymus@marigold.example>"
     And the People API was asked 1 time for "users/1234" with fields "names,emailAddresses"
 
   Scenario: a busy thread asks Google once inside the memo TTL
-    Given the Google People API knows "users/1234" as "Micah Martin" with email "micah@tonotop.com"
+    Given the Google People API knows "users/1234" as "Hieronymus Finch" with email "hieronymus@marigold.example"
     When the person "users/1234" is resolved
     And the person "users/1234" is resolved
-    Then the person renders as "Micah Martin <micah@tonotop.com>"
+    Then the person renders as "Hieronymus Finch <hieronymus@marigold.example>"
     And the People API was asked 1 time for "users/1234" with fields "names,emailAddresses"
 
   Scenario: without the directory scope the lookup fails soft and warns once
     Given the Google People API refuses with 403 "Request had insufficient authentication scopes."
-    When the person "users/1234" is resolved with display name "Micah"
-    Then the person renders as "Micah"
+    When the person "users/1234" is resolved with display name "Hieronymus"
+    Then the person renders as "Hieronymus"
     And the person has no email
     When the person "users/5678" is resolved
     Then the person renders as "users/5678"

@@ -12,7 +12,7 @@
    service account *inside* GCP: the identity is never exported, so there is
    no key to steal and none for
    `constraints/iam.disableServiceAccountKeyCreation` to refuse — the org
-   policy that left yopp running with no silence detector at all. It is also
+   policy that left isaac running with no silence detector at all. It is also
    a better probe than Isaac publishing to itself, because the message
    originates outside the process being tested rather than in a loop Isaac
    controls at both ends (isaac-clly).

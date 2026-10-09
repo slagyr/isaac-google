@@ -11,15 +11,15 @@ Feature: Google user login
   Background:
     Given an Isaac root at "target/test-state"
     And config:
-      | google.tonotop.oauth.client-id     | isaac-test.apps.googleusercontent.com |
-      | google.tonotop.oauth.client-secret | shh                                   |
-      | google.tonotop.oauth.account       | yopp@tonotop.com                      |
+      | google.marigold.oauth.client-id     | isaac-test.apps.googleusercontent.com |
+      | google.marigold.oauth.client-secret | shh                                   |
+      | google.marigold.oauth.account       | isaac@marigold.example                      |
 
   Scenario: a pasted code is exchanged and the tokens are stored
     Given the Google token endpoint returns access token "at-1" and refresh token "rt-1" expiring in 3600
     When isaac is run with "google login --code 4/0AbCd"
     Then the exit code is 0
-    And the stdout contains "Signed in as yopp@tonotop.com"
+    And the stdout contains "Signed in as isaac@marigold.example"
     And an outbound HTTP request to "https://oauth2.googleapis.com/token" matches:
       | key               | value                                 |
       | body.grant_type   | authorization_code                    |
@@ -50,7 +50,7 @@ Feature: Google user login
   # the person to agree to. A Workspace applies "Google Cloud console and SDK
   # session control" to any app requiring a Cloud Platform scope — non-Google
   # apps explicitly included — so one machine scope here puts Gmail, Chat and
-  # the directory under a 16-hour reauthentication clock. On yopp that killed
+  # the directory under a 16-hour reauthentication clock. On isaac that killed
   # the refresh token every ~15 hours (isaac-ey6q, isaac-286x).
   Scenario: the consent screen asks for no Cloud Platform scope
     Given the skybeam fixture module contributes the Google scope "https://www.googleapis.com/auth/chat.messages.readonly"

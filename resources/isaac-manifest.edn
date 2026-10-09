@@ -37,7 +37,7 @@
  ;; signed-in user — and a Workspace with "Google Cloud console and SDK session
  ;; control" applies its reauthentication frequency (default 16h) to every app
  ;; requiring a Cloud Platform scope, non-Google apps included. That one scope
- ;; put Gmail, Chat and directory under the same clock and killed yopp's refresh
+ ;; put Gmail, Chat and directory under the same clock and killed isaac's refresh
  ;; token every ~15 hours. Nothing here publishes at all now — a Cloud
  ;; Scheduler job publishes the heartbeat as a Google APIs service account
  ;; inside GCP (isaac-ey6q, isaac-286x, isaac-clly).
@@ -101,7 +101,7 @@
    {:name :google-tenant,
     :type :map,
     :message
-    "must be a map of one Google organization's config — :google is a map of organization id to config, e.g. google.tonotop.oauth.client-id",
+    "must be a map of one Google organization's config — :google is a map of organization id to config, e.g. google.marigold.oauth.client-id",
     :description "One Google organization Isaac serves.",
     :schema
     {:project
@@ -160,7 +160,7 @@
        :account
        {:type :string,
         :description
-        "Google account the tokens belong to (e.g. yopp@tonotop.com)."},
+        "Google account the tokens belong to (e.g. isaac@marigold.example)."},
        :redirect-base
        {:type :string,
         :description

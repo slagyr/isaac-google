@@ -11,7 +11,7 @@
                                  :validations [:present?]
                                  :description "OAuth client secret. Prefer ${GOOGLE_CLIENT_SECRET} from .env — never plaintext."}
                  :account       {:type        :string
-                                 :description "Google account the tokens belong to (e.g. yopp@tonotop.com)."}
+                                 :description "Google account the tokens belong to (e.g. isaac@marigold.example)."}
                  :redirect-base {:type        :string
                                  :description "Public base URL the login redirects back to, as https://<host>; the callback is <base>/google/oauth/callback and must be an Authorized redirect URI on a Web-application OAuth client. Unset, the login pastes a code (works with a Desktop client)."}}})
 
@@ -61,7 +61,7 @@
 (def tenant-schema
   {:name        :google-tenant
    :type        :map
-   :message     "must be a map of one Google organization's config — :google is a map of organization id to config, e.g. google.tonotop.oauth.client-id"
+   :message     "must be a map of one Google organization's config — :google is a map of organization id to config, e.g. google.marigold.oauth.client-id"
    :description "One Google organization Isaac serves."
    :schema      tenant-fields})
 

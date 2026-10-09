@@ -4,7 +4,7 @@
  ;; foundation/agent/http are pinned to the same commits the fleet installs
  ;; (isaac-imessage's set is the current one). Left behind at the 2026-09-18
  ;; foundation, `isaac config validate` failed here on a berth that was fine
- ;; on yopp — the :seq conformer fix (isaac-1f4g) had landed upstream a day
+ ;; on isaac — the :seq conformer fix (isaac-1f4g) had landed upstream a day
  ;; later and the harness never saw it, and the old isaac-agent then rejected
  ;; the new :defaults shape the newer foundation's harness writes. isaac-a9dp.
  :deps {

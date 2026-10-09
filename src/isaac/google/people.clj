@@ -141,7 +141,7 @@
            entry))))))
 
 (defn render
-  "\"Micah Martin <micah@tonotop.com>\" — degrades to whatever is known."
+  "\"Hieronymus Finch <hieronymus@marigold.example>\" — degrades to whatever is known."
   [{:keys [display-name email user]}]
   (let [display-name (not-empty (str (or display-name "")))
         email        (not-empty (str (or email "")))]

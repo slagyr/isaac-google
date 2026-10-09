@@ -6,14 +6,14 @@
 (def flat-config
   {:google {:project "marigold"
             :topic   "projects/marigold/topics/isaac"
-            :oauth   {:client-id "cid" :account "yopp@tonotop.com"}
+            :oauth   {:client-id "cid" :account "isaac@marigold.example"}
             :push    {:endpoint        "https://isaac.example/google/pubsub"
                       :service-account "push@marigold.iam.gserviceaccount.com"}}})
 
 (def one-tenant-config
-  {:google {:tonotop {:project "marigold"
+  {:google {:marigold {:project "marigold"
                       :topic   "projects/marigold/topics/isaac"
-                      :oauth   {:client-id "cid-t" :account "yopp@tonotop.com"}
+                      :oauth   {:client-id "cid-t" :account "isaac@marigold.example"}
                       :push    {:endpoint        "https://isaac.example/google/pubsub"
                                 :service-account "push@marigold.iam.gserviceaccount.com"}}}})
 
@@ -26,9 +26,9 @@
                        :service-account "push@acme-prod.iam.gserviceaccount.com"}}))
 
 (def comm-config
-  {:comms {:gchat      {:gchat/google :tonotop :gchat/account "yopp@tonotop.com"}
+  {:comms {:gchat      {:gchat/google :marigold :gchat/account "isaac@marigold.example"}
            :gchat-acme {:type :gchat :gchat/google :acme}
-           :gmail      {:gmail/account "yopp@tonotop.com"}
+           :gmail      {:gmail/account "isaac@marigold.example"}
            :discord    {:type :discord}}})
 
 (def tenanted-comms (merge two-tenant-config comm-config))
@@ -39,11 +39,11 @@
 
     (it "reads the declared organizations"
       (should= (:google two-tenant-config) (sut/tenants two-tenant-config))
-      (should= [:acme :tonotop] (sut/ids two-tenant-config)))
+      (should= [:acme :marigold] (sut/ids two-tenant-config)))
 
     (it "reads one organization the same way it reads several"
       (should= (:google one-tenant-config) (sut/tenants one-tenant-config))
-      (should= [:tonotop] (sut/ids one-tenant-config)))
+      (should= [:marigold] (sut/ids one-tenant-config)))
 
     ;; The flat map isaac-1zkz accepted is not a second shape: :oauth and :push
     ;; are maps, so reinterpreting would silently invent organizations named
@@ -73,7 +73,7 @@
 
     (it "always names the organization in the config path"
       (should= [:google :acme] (sut/config-path two-tenant-config :acme))
-      (should= [:google :tonotop] (sut/config-path one-tenant-config :tonotop))))
+      (should= [:google :marigold] (sut/config-path one-tenant-config :marigold))))
 
   (context "which organization am I acting as"
 
@@ -85,7 +85,7 @@
         (should= :acme (sut/resolve-id two-tenant-config nil))))
 
     (it "a lone organization needs no naming"
-      (should= :tonotop (sut/resolve-id one-tenant-config nil)))
+      (should= :marigold (sut/resolve-id one-tenant-config nil)))
 
     (it "names no organization when several are configured and none is named"
       (should-be-nil (sut/resolve-id two-tenant-config nil)))
@@ -98,7 +98,7 @@
 
     (it "stores every organization under google/<id>"
       (should= "google/acme" (sut/auth-provider :acme))
-      (should= "google/tonotop" (sut/auth-provider :tonotop)))
+      (should= "google/marigold" (sut/auth-provider :marigold)))
 
     (it "has no provider key for no organization"
       (should-be-nil (sut/auth-provider nil))))
@@ -108,7 +108,7 @@
     (it "reads the organization off the subscription's project"
       (should= :acme (sut/tenant-for-subscription two-tenant-config
                                                   "projects/acme-prod/subscriptions/isaac"))
-      (should= :tonotop (sut/tenant-for-subscription two-tenant-config
+      (should= :marigold (sut/tenant-for-subscription two-tenant-config
                                                      "projects/marigold/subscriptions/isaac")))
 
     (it "knows no organization for a project nobody configured"
@@ -134,10 +134,10 @@
                                    :google-pubsub/acme)))
 
     ;; Acme's service account signed the token, but the push arrived on
-    ;; tonotop's subscription. One of the two is lying; keep nothing.
+    ;; marigold's subscription. One of the two is lying; keep nothing.
     (it "refuses a push whose subscription and service account disagree"
       (should= {:refused          :tenant-mismatch
-                :tenant           :tonotop
+                :tenant           :marigold
                 :principal-tenant :acme}
                (sut/tenant-of-push two-tenant-config
                                    {:subscription "projects/marigold/subscriptions/isaac"}
@@ -151,11 +151,11 @@
                                    :google-pubsub/acme)))
 
     (it "reads a push with no subscription as the principal's organization"
-      (should= {:tenant :tonotop}
-               (sut/tenant-of-push one-tenant-config {} :google-pubsub/tonotop)))
+      (should= {:tenant :marigold}
+               (sut/tenant-of-push one-tenant-config {} :google-pubsub/marigold)))
 
     (it "reads an unauthenticated push as the only organization configured"
-      (should= {:tenant :tonotop}
+      (should= {:tenant :marigold}
                (sut/tenant-of-push one-tenant-config {} nil)))
 
     (it "names no organization for an unauthenticated push on a host serving several"
@@ -171,18 +171,18 @@
 
     (it "a comm speaks for the organization it names"
       (should= :acme (sut/of-comm two-tenant-config {:gchat/google "acme"}))
-      (should= :tonotop (sut/of-comm two-tenant-config {:gmail/google "tonotop"})))
+      (should= :marigold (sut/of-comm two-tenant-config {:gmail/google "marigold"})))
 
     (it "still reads a bare :google, for configs written before the rename"
       (should= :acme (sut/of-comm two-tenant-config {:google "acme"})))
 
     (it "a comm naming none speaks for the only organization configured"
-      (should= :tonotop (sut/of-comm one-tenant-config {})))
+      (should= :marigold (sut/of-comm one-tenant-config {})))
 
     (it "a comm naming none names no organization where several are configured"
       (should-be-nil (sut/of-comm two-tenant-config {})))
 
     (it "only the comms of one organization"
       (should= [:gchat-acme] (mapv key (sut/comms-for tenanted-comms :gchat :acme)))
-      (should= [:gchat] (mapv key (sut/comms-for tenanted-comms :gchat :tonotop)))
+      (should= [:gchat] (mapv key (sut/comms-for tenanted-comms :gchat :marigold)))
       (should= [] (sut/comms-for tenanted-comms :gmail :acme)))))

@@ -9,7 +9,7 @@
    to that organization's config, whether the host serves one organization or
    ten:
 
-       :google {:tonotop {:project \"tonotop-yopp\" :oauth {...} :push {...}}}
+       :google {:marigold {:project \"marigold-isaac\" :oauth {...} :push {...}}}
 
    The flat `:google {:project ...}` isaac-1zkz also accepted is gone: a second
    shape for the same thing left a reader guessing which one was meant, and

@@ -157,7 +157,7 @@ control* applies its reauthentication frequency — default **16 hours** — to
 every app requiring a Cloud Platform scope, and the page says in as many words
 that this "also applies to non-Google apps". While isaac-google asked for
 `auth/pubsub` on the **user** login, that one machine scope put the whole
-grant — Gmail, Chat, directory — under the clock: on yopp the refresh token
+grant — Gmail, Chat, directory — under the clock: on isaac the refresh token
 died 14h50m after every login, survived a fresh login, and died again on the
 same cycle, with the stored refresh token byte-identical throughout because
 Google revoked it server-side (isaac-ey6q).
@@ -169,7 +169,7 @@ only where a key can be issued, and this organization forbids exactly that:
     constraints/iam.disableServiceAccountKeyCreation
 
 which is a policy worth keeping — long-lived service-account keys are a
-standard breach vector — and which left yopp with the heartbeat switched off
+standard breach vector — and which left isaac with the heartbeat switched off
 and the push pipeline with no silence detector at all.
 
 So Isaac publishes nothing. Google's own documentation on a Cloud Scheduler
@@ -279,7 +279,7 @@ restart after both**. Do not restart in between.
 6. watch `server.log` for `:google/heartbeat-received`, and for no
    `:google/heartbeat-missed` once an interval has passed.
 
-**yopp today** runs `google.tonotop.health.heartbeat.enabled false` and
+**isaac today** runs `google.marigold.health.heartbeat.enabled false` and
 publishes nothing, which is why its push pipeline has no silence detector.
 That is the config this upgrade replaces: unset `enabled`, create the
 Scheduler job, and set `expected-interval-ms` to its schedule.

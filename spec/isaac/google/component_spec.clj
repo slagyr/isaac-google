@@ -73,19 +73,19 @@
       (let [registered (atom [])
             sched      (scheduler/create {})]
         (nexus/-with-nexus {:scheduler sched}
-          (sut/start! {:config            {:google {:tonotop {:project "marigold"}
+          (sut/start! {:config            {:google {:marigold {:project "marigold"}
                                                     :acme    {:project "acme-prod"}}}
                        :register-identity! (fn [entry] (swap! registered conj (entry-id entry)))}))
-        (should= [:google/oauth-callback :google-pubsub/acme :google-pubsub/tonotop] (sort @registered))
+        (should= [:google/oauth-callback :google-pubsub/acme :google-pubsub/marigold] (sort @registered))
         (scheduler/shutdown! sched)))
 
     (it "registers a one-organization host's single rule, named after it"
       (let [registered (atom [])
             sched      (scheduler/create {})]
         (nexus/-with-nexus {:scheduler sched}
-          (sut/start! {:config             {:google {:tonotop {:project "marigold"}}}
+          (sut/start! {:config             {:google {:marigold {:project "marigold"}}}
                        :register-identity! (fn [entry] (swap! registered conj (entry-id entry)))}))
-        (should= [:google-pubsub/tonotop :google/oauth-callback] @registered)
+        (should= [:google-pubsub/marigold :google/oauth-callback] @registered)
         (scheduler/shutdown! sched)))
 
     ;; A host that starts no background services still answers pushes, so the
@@ -99,16 +99,16 @@
 
     (it "takes the live config when no config is named"
       (let [registered (atom [])]
-        (loader/set-snapshot! {:google {:tonotop {:project "marigold"}}} "component spec")
+        (loader/set-snapshot! {:google {:marigold {:project "marigold"}}} "component spec")
         (with-redefs [door/registrar (fn [] (fn [entry] (swap! registered conj (entry-id entry))))]
           (sut/register-door! nil nil))
-        (should= [:google-pubsub/tonotop :google/oauth-callback] @registered)))
+        (should= [:google-pubsub/marigold :google/oauth-callback] @registered)))
 
     ;; The consent redirect is a browser with no credentials, so the callback
     ;; door opens itself — on that one path, with one scope (isaac-2abl).
     (it "opens the OAuth callback door alongside the push door"
       (let [registered (atom [])]
-        (loader/set-snapshot! {:google {:tonotop {:project "marigold"}}} "component spec")
+        (loader/set-snapshot! {:google {:marigold {:project "marigold"}}} "component spec")
         (with-redefs [door/registrar (fn [] (fn [entry] (swap! registered conj entry)))]
           (sut/register-door! nil nil))
         (should-contain door/callback-verifier @registered)))

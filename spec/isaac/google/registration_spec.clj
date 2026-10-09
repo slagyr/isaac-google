@@ -76,15 +76,15 @@
     ;; Every reconcile is one organization's: with none configured there is no
     ;; token to reach Google with, so there is nothing to reconcile
     ;; (isaac-okfj).
-    (with cfg {:google {:tonotop {:project "p-tonotop"}}})
+    (with cfg {:google {:marigold {:project "p-marigold"}}})
     (with entry (let [calls @calls]
                   {:create! (fn [k] (swap! calls conj [:create k])
                               {:name k :expiration "1790424000000"})
                    :renew!  (fn [n] (swap! calls conj [:renew n])
                               {:name n :expiration "1790424000000"})
                    :expiry  (fn [r] (some-> (:expiration r) parse-long Instant/ofEpochMilli))
-                   :key     (fn [] ["yopp@tonotop.com"])
-                   :remote  (fn [] (select-keys (sut/load-state root) ["yopp@tonotop.com"]))
+                   :key     (fn [] ["isaac@marigold.example"])
+                   :remote  (fn [] (select-keys (sut/load-state root) ["isaac@marigold.example"]))
                    :delete! (fn [n] (swap! calls conj [:stop n]))}))
 
     (around [example]
@@ -98,27 +98,27 @@
     (it "creates on the first tick, remembers the expiry, and does not create again"
       (sut/register! [:gmail-watch @entry])
       (sut/tick! {:now now :root root :config @cfg :door-up? true})
-      (should= [[:create "yopp@tonotop.com"]] @@calls)
-      (should= "2026-09-26T12:00:00Z" (get-in (sut/load-state root) ["yopp@tonotop.com" :expires-at]))
+      (should= [[:create "isaac@marigold.example"]] @@calls)
+      (should= "2026-09-26T12:00:00Z" (get-in (sut/load-state root) ["isaac@marigold.example" :expires-at]))
       (sut/tick! {:now now :root root :config @cfg :door-up? true})
-      (should= [[:create "yopp@tonotop.com"]] @@calls))
+      (should= [[:create "isaac@marigold.example"]] @@calls))
 
     (it "renews through :renew! once the remembered expiry is inside the window"
       (sut/register! [:gmail-watch @entry])
-      (sut/save-state! root {"yopp@tonotop.com" {:name "yopp@tonotop.com" :expires-at "2026-09-19T06:00:00Z"}})
+      (sut/save-state! root {"isaac@marigold.example" {:name "isaac@marigold.example" :expires-at "2026-09-19T06:00:00Z"}})
       (sut/tick! {:now now :root root :config @cfg :door-up? true})
-      (should= [[:renew "yopp@tonotop.com"]] @@calls))
+      (should= [[:renew "isaac@marigold.example"]] @@calls))
 
     (it "ticks with no :door-up? in opts the way the scheduler calls it, deciding door state itself"
       (sut/register! [:gmail-watch @entry])
       (should-not-throw (sut/tick! {:root root :config @cfg}))
-      (should= [[:create "yopp@tonotop.com"]] @@calls))
+      (should= [[:create "isaac@marigold.example"]] @@calls))
 
     (it "stops through :delete! when the key left config"
       (sut/register! [:gmail-watch (assoc @entry :key (fn [] []) :remote (fn [] (sut/load-state root)))])
-      (sut/save-state! root {"yopp@tonotop.com" {:name "yopp@tonotop.com" :expires-at "2026-09-24T12:00:00Z"}})
+      (sut/save-state! root {"isaac@marigold.example" {:name "isaac@marigold.example" :expires-at "2026-09-24T12:00:00Z"}})
       (sut/tick! {:now now :root root :config @cfg :door-up? true})
-      (should= [[:stop "yopp@tonotop.com"]] @@calls)
+      (should= [[:stop "isaac@marigold.example"]] @@calls)
       (should= {} (sut/load-state root)))
 
     ;; No organizations, no reconcile: there is no default to act as.
@@ -132,7 +132,7 @@
   (context "several Google organizations"
 
     (with calls (atom []))
-    (with cfg {:google {:tonotop {:project "p-tonotop" :renew-within-hours 24}
+    (with cfg {:google {:marigold {:project "p-marigold" :renew-within-hours 24}
                         :acme    {:project "p-acme" :renew-within-hours 1}}})
     (with entry (let [calls @calls]
                   {:create! (fn [k]
@@ -159,17 +159,17 @@
       (sut/register! [:chat @entry])
       (sut/tick! {:now now :root root :config @cfg :door-up? true})
       (should= [[:create :acme "spaces/acme"]
-                [:create :tonotop "spaces/tonotop"]]
+                [:create :marigold "spaces/marigold"]]
                @@calls))
 
     (it "renews inside each tenant's own window"
       (sut/register! [:chat @entry])
       (sut/save-state! root {"spaces/acme"    {:name "subscriptions/s-acme"
                                                :expires-at "2026-09-19T06:00:00Z"}
-                             "spaces/tonotop" {:name "subscriptions/s-tonotop"
+                             "spaces/marigold" {:name "subscriptions/s-marigold"
                                                :expires-at "2026-09-19T06:00:00Z"}})
       (sut/tick! {:now now :root root :config @cfg :door-up? true})
-      (should= [[:renew :tonotop "subscriptions/s-tonotop"]] @@calls))
+      (should= [[:renew :marigold "subscriptions/s-marigold"]] @@calls))
 
     ;; Health is judged per organization, so the tick hands it each
     ;; organization with the keys that organization owns (isaac-an14). It
@@ -182,7 +182,7 @@
         (with-redefs [isaac.google.health/evaluate (fn [opts] (reset! judged opts) [])]
           (sut/tick! {:now now :root root :config @cfg :door-up? true}))
         (should= [{:tenant :acme :keys ["spaces/acme"]}
-                  {:tenant :tonotop :keys ["spaces/tonotop"]}]
+                  {:tenant :marigold :keys ["spaces/marigold"]}]
                  (:tenants @judged))))
     )
 
@@ -191,7 +191,7 @@
   ;; from as well as the registered ones (isaac-an14, after isaac-ihuc).
   (context "what health is judged by"
 
-    (with cfg {:google {:tonotop {:project "p-tonotop"}}})
+    (with cfg {:google {:marigold {:project "p-marigold"}}})
     (with entry {:create! (fn [_] {:name "subscriptions/s-all" :expireTime "2026-09-25T12:00:00Z"})
                  :renew!  (fn [n] {:name n :expireTime "2026-09-25T12:00:00Z"})
                  :key     (fn [] ["spaces/-"])
@@ -212,6 +212,6 @@
         (isaac.google.health/save-state! root {:last-event-at {"spaces/AAA" "2026-09-18T11:59:00Z"}})
         (with-redefs [isaac.google.health/evaluate (fn [opts] (reset! judged opts) [])]
           (sut/tick! {:now now :root root :config @cfg :door-up? true}))
-        (should= [{:tenant :tonotop :keys ["spaces/-" "spaces/AAA"]}] (:tenants @judged))))
+        (should= [{:tenant :marigold :keys ["spaces/-" "spaces/AAA"]}] (:tenants @judged))))
     )
   )

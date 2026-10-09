@@ -12,11 +12,11 @@ Feature: Google health and attention
     Given default Grover setup in "/test/google-health"
     And config:
       | log.output                               | memory                         |
-      | google.tonotop.topic                             | projects/marigold/topics/isaac |
-      | google.tonotop.health.silent-after-hours         | 6                              |
+      | google.marigold.topic                             | projects/marigold/topics/isaac |
+      | google.marigold.health.silent-after-hours         | 6                              |
       | attention.notify.comm                    | discord                        |
       | attention.notify.target                  | boiler-room                    |
-      | comms.gchat.gchat/account                | yopp@tonotop.com               |
+      | comms.gchat.gchat/account                | isaac@marigold.example               |
       | comms.gchat.gchat/spaces.spaces/ENG.name | engineering                    |
     And the google auth store has access "at-1" and refresh "rt-1"
     And the Workspace Events API has subscription "subscriptions/s-eng" for "spaces/ENG" expiring at "2026-09-25T12:00:00Z"
@@ -27,13 +27,13 @@ Feature: Google health and attention
     When the google registration timer ticks
     Then the log has entries matching:
       | level | event          | tenant   | silent-hours |
-      | :warn | :google/silent | :tonotop | 8            |
+      | :warn | :google/silent | :marigold | 8            |
     And the directory "comm/delivery/pending" has exactly 1 file
     And the only file in "comm/delivery/pending" EDN contains:
       | path    | value                                    |
       | comm    | discord                                  |
       | target  | boiler-room                              |
-      | content | contains "tonotop" and "no event for 8h" |
+      | content | contains "marigold" and "no event for 8h" |
     When the test clock advances 3600000 milliseconds
     And the google registration timer ticks
     Then the directory "comm/delivery/pending" has exactly 1 file
@@ -63,7 +63,7 @@ Feature: Google health and attention
     And the google registration timer ticks
     Then the log has entries matching:
       | level | event          | tenant   | silent-hours |
-      | :warn | :google/silent | :tonotop | 7            |
+      | :warn | :google/silent | :marigold | 7            |
 
   Scenario: an event clears the silence and the clear is logged once
     Given the last Google event for "spaces/ENG" was at "2026-09-18T04:00:00Z"
@@ -76,7 +76,7 @@ Feature: Google health and attention
     And the google registration timer ticks
     Then the log has entries matching:
       | level | event                  | kind    | subject  |
-      | :info | :google/health-cleared | :silent | :tonotop |
+      | :info | :google/health-cleared | :silent | :marigold |
     When the test clock advances 3600000 milliseconds
     And the google registration timer ticks
     Then the log has exactly 1 entries matching:
@@ -91,9 +91,9 @@ Feature: Google health and attention
   # (isaac-clly).
   Scenario: a heartbeat that stops arriving is reported once and cleared when one does
     Given config:
-      | google.tonotop.health.heartbeat.expected-interval-ms | 3600000 |
+      | google.marigold.health.heartbeat.expected-interval-ms | 3600000 |
     And the last Google event for "spaces/ENG" was at "2026-09-18T11:30:00Z"
-    And a Google heartbeat for "tonotop" arrived at "2026-09-18T11:30:00Z"
+    And a Google heartbeat for "marigold" arrived at "2026-09-18T11:30:00Z"
     When the google registration timer ticks
     Then no outbound HTTP request to "https://pubsub.googleapis.com/v1/projects/marigold/topics/isaac:publish" was made
     And the log has no entries matching:
@@ -103,21 +103,21 @@ Feature: Google health and attention
     And the google registration timer ticks
     Then the log has entries matching:
       | level | event                    | tenant   |
-      | :warn | :google/heartbeat-missed | :tonotop |
+      | :warn | :google/heartbeat-missed | :marigold |
     And the only file in "comm/delivery/pending" EDN contains:
       | path    | value                                     |
-      | content | contains "tonotop" and "heartbeat missed" |
+      | content | contains "marigold" and "heartbeat missed" |
     When the test clock advances 3600000 milliseconds
     And the google registration timer ticks
     Then the log has exactly 1 entries matching:
       | event                    |
       | :google/heartbeat-missed |
-    When a Google heartbeat for "tonotop" arrived at "2026-09-18T14:00:00Z"
+    When a Google heartbeat for "marigold" arrived at "2026-09-18T14:00:00Z"
     And the test clock advances 60000 milliseconds
     And the google registration timer ticks
     Then the log has entries matching:
       | level | event                  | kind              | subject  |
-      | :info | :google/health-cleared | :heartbeat-missed | :tonotop |
+      | :info | :google/health-cleared | :heartbeat-missed | :marigold |
 
   # The regression this bean exists for. Judged by pairing a send with an
   # arrival, an organization nobody publishes for has no send, so the
@@ -126,12 +126,12 @@ Feature: Google health and attention
   # having stopped seeing them (isaac-clly).
   Scenario: an organization that has never seen a heartbeat reports missed, not nothing
     Given config:
-      | google.tonotop.health.heartbeat.expected-interval-ms | 3600000 |
+      | google.marigold.health.heartbeat.expected-interval-ms | 3600000 |
     And the last Google event for "spaces/ENG" was at "2026-09-18T11:30:00Z"
     When the google registration timer ticks
     Then the log has entries matching:
       | level | event                    | tenant   |
-      | :warn | :google/heartbeat-missed | :tonotop |
+      | :warn | :google/heartbeat-missed | :marigold |
 
   Scenario: an expiry in the past is renewed immediately and reported
     Given the Workspace Events API has subscription "subscriptions/s-eng" for "spaces/ENG" expiring at "2026-09-18T09:00:00Z"

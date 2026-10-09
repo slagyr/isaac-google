@@ -106,25 +106,25 @@
 
   (it "passes when conditions are at the threshold"
     (should= :pass (:status (sut/decide-silent
-                              {:conditions [{:kind :silent :tenant :tonotop :silent-hours 8}]
+                              {:conditions [{:kind :silent :tenant :marigold :silent-hours 8}]
                                :threshold  1}))))
 
   (it "fails and names each organization past the threshold"
     (let [result (sut/decide-silent
-                   {:conditions [{:kind :silent :tenant :tonotop :silent-hours 8}]
+                   {:conditions [{:kind :silent :tenant :marigold :silent-hours 8}]
                     :threshold  0})]
       (should= :fail (:status result))
-      (should-contain "tonotop" (:evidence result))
+      (should-contain "marigold" (:evidence result))
       (should-contain "8h" (:evidence result))))
 
   ;; A missed heartbeat is the same watchdog: the pipeline is not delivering,
   ;; whether or not anyone has been talking (isaac-an14).
   (it "fails on a missed heartbeat"
     (let [result (sut/decide-silent
-                   {:conditions [{:kind :heartbeat-missed :tenant :tonotop :deadline-ms 60000}]
+                   {:conditions [{:kind :heartbeat-missed :tenant :marigold :deadline-ms 60000}]
                     :threshold  0})]
       (should= :fail (:status result))
-      (should-contain "tonotop" (:evidence result))
+      (should-contain "marigold" (:evidence result))
       (should-contain "heartbeat" (:evidence result))))
 
   (it "ignores conditions that are neither"

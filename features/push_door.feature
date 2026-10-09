@@ -14,9 +14,9 @@ Feature: Google Pub/Sub push door
   Background:
     Given an Isaac root at "target/test-state"
     And config:
-      | google.tonotop.topic                | projects/marigold/topics/isaac               |
-      | google.tonotop.push.endpoint        | https://isaac.example/google/pubsub          |
-      | google.tonotop.push.service-account | pubsub-push@marigold.iam.gserviceaccount.com |
+      | google.marigold.topic                | projects/marigold/topics/isaac               |
+      | google.marigold.push.endpoint        | https://isaac.example/google/pubsub          |
+      | google.marigold.push.service-account | pubsub-push@marigold.iam.gserviceaccount.com |
       | http.oidc.jwks-alert-threshold      | 1                                             |
     And Google signs push tokens with a test key
     And the skybeam fixture module handles Google events of type "google.workspace.chat.message.v1.created"
@@ -33,7 +33,7 @@ Feature: Google Pub/Sub push door
     And the skybeam handler received no messages
     And the log has entries matching:
       | level | event                 | principal              | message-id |
-      | :info | :google/push-received | :google-pubsub/tonotop | m-1        |
+      | :info | :google/push-received | :google-pubsub/marigold | m-1        |
     When the inbox worker ticks
     Then the skybeam handler received message "m-1"
     And the isaac file "google/inbox/done/m-1.edn" exists
@@ -41,12 +41,12 @@ Feature: Google Pub/Sub push door
   Scenario: the tick's own heartbeat is recorded at the door and starts nothing
     When Google pushes message "hb-1" of type "isaac.google/heartbeat" with data:
       """
-      {"isaac-heartbeat": true, "tenant": "tonotop"}
+      {"isaac-heartbeat": true, "tenant": "marigold"}
       """
     Then the response status is 204
     And the isaac file "google/health.edn" EDN contains:
       | path                        | value |
-      | last-heartbeat-at.tonotop   | #*    |
+      | last-heartbeat-at.marigold   | #*    |
     And the isaac file "google/inbox/pending/hb-1.edn" does not exist
     When the inbox worker ticks
     Then the skybeam handler received no messages
@@ -175,7 +175,7 @@ Feature: Google Pub/Sub push door
       """
     And Google pushes a Gmail watch message "m-7" with data:
       """
-      {"emailAddress": "yopp@tonotop.com", "historyId": "12345"}
+      {"emailAddress": "isaac@marigold.example", "historyId": "12345"}
       """
     And the inbox worker ticks
     Then the isaac file "google/inbox/failed/m-6.edn" exists
